@@ -1,4 +1,6 @@
 import torch, torch.nn as nn
+
+NC = 163  # 0..107 кириллица/пунктуация, 108 не исп., BLANK 109, UNK 110, 111..162 латиница
 import onnx
 from onnx import numpy_helper
 import numpy as np
@@ -15,9 +17,9 @@ class CRNN(nn.Module):
         )
         self.gru1 = nn.GRU(256, 128, bidirectional=True, batch_first=True)
         self.gru2 = nn.GRU(256, 128, bidirectional=True, batch_first=True)
-        self.head = nn.Linear(256, 111)
+        self.head = nn.Linear(256, NC)
 
-    def forward(self, x):              # x: (1,1,32,W) → (1,T,111)
+    def forward(self, x):              # x: (1,1,32,W) → (1,T,163)
         f = self.conv(x)               # (1,128,H',W')
         b, c, h, w = f.shape
         f = f.permute(0, 3, 1, 2).reshape(b, w, c * h)  # (1,W',256)
@@ -69,8 +71,8 @@ if __name__ == '__main__':
         ref = sess.run(None, {'x': x})[0]
         with torch.no_grad():
             out = net(torch.from_numpy(x)).numpy()
-        ref2 = ref.reshape(ref.shape[0]*ref.shape[1], 111) if ref.ndim == 3 else ref
-        d = np.abs(out.reshape(-1, 111) - ref2).max()
+        ref2 = ref.reshape(ref.shape[0]*ref.shape[1], NC) if ref.ndim == 3 else ref
+        d = np.abs(out.reshape(-1, NC) - ref2).max()
         print(f'W={W_}: torch{out.shape} onnx{ref.shape} max|diff|={d:.2e}')
         ok &= d < 1e-4
     print('EQUIVALENT' if ok else 'MISMATCH!')

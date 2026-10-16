@@ -1,4 +1,4 @@
-name: Train r24 (cool-down p=0.12/600) & APK v1.9.3 с r22
+name: Train r25 (латиница 111→163, градиент-ауг, 1500 шагов) & APK v1.9.4 с r22
 
 on:
   workflow_dispatch: {}
@@ -63,14 +63,14 @@ jobs:
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
           python3 -c "import sys;[sys.exit(2) if __import__('os').path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
           python3 finetune_chain.py \
-            --inp base_r22.onnx --out best_r24_cool.onnx \
-            --font fonts_extra/AnimeAceCyr.ttf --p 0.12 \
+            --inp base_r22.onnx --out best_r25_lat.onnx \
+            --font fonts_extra/AnimeAceCyr.ttf --p 0.16 \
             --prev fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf fonts/YanoneKaffeesatz.ttf fonts/Oswald.ttf fonts/Play-Bold.ttf fonts/RobotoCondensed.ttf fonts/AmaticSC-Bold.ttf fonts/Underdog.ttf fonts/KellySlab.ttf fonts/RuslanDisplay.ttf \
-            --steps 600 --tag r24_cool 2>&1 | tee r24_train.log
+            --steps 1500 --tag r25_lat 2>&1 | tee r25_train.log
 
       - name: Hash
         id: hash
-        run: echo "sha=$(md5sum training/best_r21_manga_v1.onnx 2>/dev/null || md5sum training/best_r24_cool.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(md5sum training/best_r21_manga_v1.onnx 2>/dev/null || md5sum training/best_r25_lat.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload r14 to release v1.0.0
         uses: softprops/action-gh-release@v2
@@ -78,13 +78,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.0
-          files: training/best_r24_cool.onnx
+          files: training/best_r25_lat.onnx
 
       - name: Upload training log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: r24-train-log
-          path: training/r24_train.log
+          name: r25-train-log
+          path: training/r25_train.log
 
   build_apk:
     needs: train_r13
@@ -112,7 +112,7 @@ jobs:
       - name: Download r13 (from train job release upload) & put into APK assets + bump version
         run: |
           curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r22_manga.onnx" -o app/src/main/assets/best.onnx
-          sed -i 's/versionCode 1/versionCode 13/; s/versionName "1.0"/versionName "1.9.3"/' app/build.gradle
+          sed -i 's/versionCode 1/versionCode 14/; s/versionName "1.0"/versionName "1.9.4"/' app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
 
       - name: Build release APK
@@ -122,39 +122,39 @@ jobs:
 
       - name: Sign APK (debug key from ci/)
         run: |
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.9.3.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.9.3.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.9.3.apk | head -2
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.9.4.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.9.4.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.9.4.apk | head -2
 
       - name: APK hash
         id: apkhash
-        run: echo "md5=$(md5sum OCR-chat-v1.9.3.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "md5=$(md5sum OCR-chat-v1.9.4.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Tag v1.9.3 on this commit
+      - name: Tag v1.9.4 on this commit
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git tag -a v1.9.3 -m "v1.9.3 — APK на r22_manga (рекорд 0.731), r24 в v1.0.0"
-          git push origin v1.9.3
+          git tag -a v1.9.4 -m "v1.9.4 — APK на r22_manga (0.731); r25_lat (+латиница, +градиент-ауг) в v1.0.0"
+          git push origin v1.9.4
 
-      - name: Release v1.9.3 (APK + all models from v1.0.0)
+      - name: Release v1.9.4 (APK + all models from v1.0.0)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.9.3
-          name: OCR чат v1.9.3
+          tag_name: v1.9.4
+          name: OCR чат v1.9.4
           body: |
-            **OCR-chat-v1.9.3.apk** — цикл 10: встроена по-прежнему **r22_manga** (0.731/1.0 на 51 GT-строке); r24_cool (cool-down 600 шагов p=0.12) лежит в релизе v1.0.0 для проверки через кнопку 📦.
-            Модели r0–r24 отдельными файлами см. в релизе v1.0.0.
+            **OCR-chat-v1.9.4.apk** — цикл 11: встроена по-прежнему **r22_manga** (0.731/1.0 на 51 GT-строке); r25_lat (латиница в алфавите, 1500 шагов от r22) лежит в релизе v1.0.0 для проверки через кнопку 📦.
+            Модели r0–r25 отдельными файлами см. в релизе v1.0.0.
           files: |
-            OCR-chat-v1.9.3.apk
+            OCR-chat-v1.9.4.apk
 
       - name: Upload APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: OCR-chat-v1.9.3.apk
-          path: OCR-chat-v1.9.3.apk
+          name: OCR-chat-v1.9.4.apk
+          path: OCR-chat-v1.9.4.apk
 
       - name: Print summary
         run: |

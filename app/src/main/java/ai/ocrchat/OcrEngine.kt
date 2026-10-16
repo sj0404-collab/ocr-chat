@@ -24,7 +24,7 @@ data class OcrResult(val lines: List<OcrLine>, val annotated: Bitmap, val ms: Lo
  * Баллоны на любых страницах (сырые блобы l<45/l>210, fill>=45%, не у края): строки-полосы
  * rowsum внутри (BFS режет кольца контуров и шум <3px), полярность — по типу баллона;
  * тёмная страница (luma<100): остаток с инверсным порогом; яркость строк инвертится по полярности.
- * readLine: h=32, белый правый пад, luma/255, CTC blank=109/unk=110, softmax-медиана.
+ * readLine: h=32, белый правый пад, luma/255, CTC blank=109/unk=110, lat 111..162, softmax-медиана.
  * Все кропы жёстко клампятся в рамки битмапа (защита от "empty range / max<min").
  */
 class OcrEngine(modelBytes: ByteArray) {
@@ -36,6 +36,7 @@ class OcrEngine(modelBytes: ByteArray) {
             " .,!?;:\"'«»„“”()[]—–-…№*/0123456789"
         const val BLANK = 109
         const val UNK = 110
+        const val LAT = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"  // индексы 111..162
         const val LINE_H = 32
         const val MAX_DIM = 1400
     }
@@ -429,7 +430,8 @@ class OcrEngine(modelBytes: ByteArray) {
             for (k in 0 until classes) if (step[k] > bs) { bs = step[k]; bi = k }
             if (bi == BLANK || bi == UNK) { prev = bi; continue }
             if (bi != prev && bi >= 0) {
-                if (bi < CHARSET.length) sb.append(CHARSET[bi]) else sb.append('�')
+                if (bi in 111..162) sb.append(LAT[bi - 111])
+                else if (bi < CHARSET.length) sb.append(CHARSET[bi]) else sb.append('�')
                 probs.add(exp((bs - mx).toDouble()).toFloat() / sum)
             }
             prev = bi

@@ -12,6 +12,20 @@ CHARSET = ("АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
            "ЇїІіЄєҐґ"
            " .,!?;:\"'«»„“”()[]—–-…№*/0123456789")
 BLANK, C2I = 109, {c: i for i, c in enumerate(CHARSET)}
+LAT = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+LAT_OFF, NC = 111, 163   # BLANK 109 / UNK 110 не сдвигаем: старые onnx и декодеры совместимы; латиница с 111
+
+EWORDS = ('CRACK FLASH BOOM SWITCH BANG SNAP WHOOSH THUD GASP BLINK CREAK POP CLANG DRIP '
+          'SCRATCH OH WOW HMPH YEAH HUH COFFEE SUGAR MILK BREAD BUTTER SISTER FATHER MOTHER '
+          'SCHOOL RIVER BLACK WHITE GREEN ORANGE VIOLET TODAY TOMORROW NIGHT HEART MOON STORY '
+          'FRIEND KING QUEEN SWORD GATE ROSE GLASS HOUSE WORLD MAKE TAKE GIVE WAIT COME LEFT '
+          'RIGHT OPEN DOOR LIGHT MACHINE REPAIR ANDROID ENGLISH UNKNOWN QUESTION ANSWER TAP '
+          'CHIRP TUK AH HEY YES PLEASE SORRY').split()
+EPHRASES = ["WAIT!", "IT'S OVER.", 'No way back…', 'Open the door!', '1 page of 11',
+            'Chapter 64. Epilogue', 'Turn it off — NOW.', 'GOOD MORNING, MASTER!',
+            'Unknown error #7.', 'Something is wrong here.', 'PLEASE STAND BY…',
+            'THE ANSWER IS 42!', 'Single page only.', 'MEET ME AT FIVE?!',
+            'Author: Cat & Spices', 'TUK! TUK!', 'CHIRP CHIRP…', 'AH~']
 
 FONTDIR = '/home/user/ocr_train3/fonts'
 DEV = []
@@ -46,7 +60,17 @@ PHRASES = [
  'Беги, не оглядывайся!!', 'Я знал это с самого начала…',
 ]
 
+def gen_eng(rng):
+    if rng.random() < 0.45: return rng.choice(EPHRASES)
+    ws = [rng.choice(EWORDS) for _ in range(rng.randint(1, 4))]
+    s = ' '.join(ws)
+    if rng.random() < 0.6: s = s.upper()
+    elif rng.random() < 0.5: s = s.capitalize()
+    if rng.random() < 0.4: s += rng.choice(['!', '?', '…', '.', ''])
+    return s[:40]
+
 def gen_line(rng):
+    if rng.random() < 0.25: return gen_eng(rng)
     if rng.random() < 0.5: return rng.choice(PHRASES)
     ws = [rng.choice(WORDS) for _ in range(rng.randint(2, 8))]
     s = ' '.join(ws)
@@ -82,6 +106,14 @@ def render(s, rng, fpath):
                stroke_width=rng.randint(1, 3), stroke_fill=rng.randint(80, 200))
     else:
         d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink)
+    if rng.random() < 0.2:  # вертикальный градиент чернил (декоративный капс титульных)
+        arr = np.asarray(img, np.float32) / 255.0
+        mask = arr < 0.55
+        top = rng.randint(5, 110) / 255.0; bot = rng.randint(120, 240) / 255.0
+        if rng.random() < 0.5: top, bot = bot, top
+        g = np.linspace(top, bot, img.height, dtype=np.float32)[:, None]
+        r2 = np.where(mask, g, arr)
+        img = Image.fromarray((r2 * 255).astype(np.uint8))
     if rng.random() < 0.35: img = img.filter(ImageFilter.GaussianBlur(rng.random()*0.8))
     if rng.random() < 0.35: img = img.rotate(rng.uniform(-1.2, 1.2), expand=False, fillcolor=bg)
     if rng.random() < 0.25:  # курсив (аффинный скос ±0.25, титры/звуковые FX манги)
@@ -148,7 +180,7 @@ def make_batch(rng, bs, mix, seedlabel=None, real_p=0.0):
             s = gen_line(rng)
             img = render(s, rng, pick_font(rng, mix))
             xs.append(to_canvas(img, rng))
-        lab = [C2I[c] for c in s if c in C2I]
+        lab = [v for v in ((C2I[c] if c in C2I else (LAT_OFF + LAT.index(c) if c in LAT else -1)) for c in s) if v >= 0]
         ys.append(lab); ylens.append(len(lab)); ws.append(xs[-1].shape[2])
     maxw = max(x.shape[2] for x in xs)
     xb = np.ones((len(xs), 1, 32, maxw), np.float32)
@@ -172,6 +204,7 @@ def evaluate(net, samples):
             out, prev = [], -2
             for i in ids:
                 if i == BLANK or i == 110: prev = i; continue
+                if i != prev and LAT_OFF <= i < NC: out.append(LAT[i - LAT_OFF])
                 if i != prev and 0 <= i < len(CHARSET): out.append(CHARSET[i])
                 prev = i
             hyp = ''.join(out).strip()
@@ -183,6 +216,9 @@ def evaluate(net, samples):
 
 def build_eval(rng, fontpath, n=100):
     return [(s := gen_line(rng), to_canvas(render(s, rng, fontpath), rng)) for _ in range(n)]
+
+def build_eval_lat(rng, fontpath, n=60):
+    return [(s := gen_eng(rng), to_canvas(render(s, rng, fontpath), rng)) for _ in range(n)]
 
 def load_chain(model, path):
     """Load ONNX from this chain (torch-style conv names + onnx::GRU_*/MatMul_*)."""
@@ -198,11 +234,30 @@ def load_chain(model, path):
     grur = sorted([k for k in W if shape(k) == (2, 384, 128)])
     grub = sorted([k for k in W if shape(k) == (2, 768)])
     assert len(gruw) == 2 and len(grur) == 2 and len(grub) == 2, (gruw, grur, grub)
-    # head: (256,111) matmul or direct (111,256)
-    heads = [k for k in W if shape(k) == (256, 111)]
-    hb = [k for k in W if shape(k) == (111,)]
-    mm['head.weight'] = torch.from_numpy(W[heads[0]].T.copy())
-    mm['head.bias'] = torch.from_numpy(W[hb[-1]])
+    # head: уже-163 (след. циклы) или старый-111 → достраиваем близнецами из кириллицы
+    n_in = 163 if [k for k in W if shape(k) == (256, 163)] else 111
+    heads = [k for k in W if shape(k) == (256, n_in)]
+    hb = [k for k in W if shape(k) == (n_in,)]
+    oldW, oldB = W[heads[0]].T.copy(), W[hb[-1]].copy()
+    if n_in == 111:
+        TW = {'A':'А','a':'а','B':'В','C':'С','c':'с','E':'Е','e':'е','H':'Н','h':'н','I':'І','i':'і',
+              'K':'К','k':'к','M':'М','m':'м','O':'О','o':'о','P':'Р','p':'р','R':'Р','T':'Т','t':'т',
+              'W':'ш','X':'Х','x':'х','Y':'У','y':'у','Z':'З','z':'з'}
+        rngn = np.random.default_rng(123).uniform
+        sd = max(1e-3, float(oldW.std()))
+        newW = np.empty((163, 256), np.float32); newB = np.empty((163,), np.float32)
+        newW[:111], newB[:111] = oldW, oldB
+        randn = 0
+        for i, ch in enumerate(LAT):
+            dst = LAT_OFF + i; tw = TW.get(ch)
+            if tw and tw in C2I:
+                newW[dst], newB[dst] = oldW[C2I[tw]], oldB[C2I[tw]]
+            else:
+                newW[dst] = rngn(-sd, sd, 256).astype(np.float32); newB[dst] = 0; randn += 1
+        oldW, oldB = newW, newB
+        print(f'head extend 111→163: twins={52 - randn} rand={randn}', flush=True)
+    mm['head.weight'] = torch.from_numpy(oldW)
+    mm['head.bias'] = torch.from_numpy(oldB)
     def put(gru, wk, rk, bk, gates_mode):
         H, S = 128, [3*128]
         w, r, b = W[wk], W[rk], W[bk]
@@ -226,7 +281,8 @@ def load_chain(model, path):
         x = np.random.rand(1, 1, 32, 64).astype(np.float32)
         ref = sess.run(None, {'x': x})[0]
         with torch.no_grad(): out = model(torch.from_numpy(x)).numpy()
-        d = np.abs(out.reshape(-1, 111) - ref.reshape(-1, 111)).max()
+        n_cmp = min(out.shape[-1], ref.shape[-1])
+        d = np.abs(out.reshape(-1, n_cmp) - ref.reshape(-1, ref.shape[-1])[:, :n_cmp].reshape(-1, n_cmp)).max()
         if d < 1e-4:
             print(f'load_chain gates={mode} OK (max|diff|={d:.2e})', flush=True)
             break
@@ -260,7 +316,8 @@ def main():
     evg = random.Random(7)
     e_t = build_eval(evg, a.font, 120); e_d = build_eval(evg, random.choice(DEV), 120)
     e_mix = build_eval(evg, a.font, 60) + build_eval(evg, random.choice(DEV), 60)
-    print(f'[{a.tag}] BEFORE: font={evaluate(net, e_t):.4f} dejavu={evaluate(net, e_d):.4f}', flush=True)
+    e_lat = build_eval_lat(evg, a.font)
+    print(f'[{a.tag}] BEFORE: font={evaluate(net, e_t):.4f} dejavu={evaluate(net, e_d):.4f} lat={evaluate(net, e_lat):.4f}', flush=True)
     rng = random.Random(a.seed)
     ctc = nn.CTCLoss(blank=BLANK, zero_infinity=True)
     opt = torch.optim.AdamW(net.parameters(), lr=5e-5, weight_decay=1e-5)
