@@ -1,4 +1,4 @@
-name: Train r20 (real data, мягко) & build+release APK v1.8
+name: Train r21 (марера-леттеринг AnimeAce/Manga/Comics) & build APK v1.9
 
 on:
   workflow_dispatch: {}
@@ -56,16 +56,21 @@ jobs:
 
       - name: Train r19 (1200 steps, 25% реальные строки со скринов юзера)
         run: |
-          cd training && python3 finetune_chain.py \
-            --inp base_r18.onnx --out best_r20_real.onnx \
-            --realdir real --realp 0.06 \
-            --font fonts/YanoneKaffeesatz.ttf --p 0.14 \
-            --prev fonts/Oswald.ttf fonts/Play-Bold.ttf fonts/YanoneKaffeesatz.ttf fonts/RobotoCondensed.ttf fonts/MarckScript.ttf fonts/BadScript.ttf fonts/Pacifico.ttf fonts/Neucha.ttf fonts/Underdog.ttf fonts/KellySlab.ttf fonts/Caveat.ttf fonts/RuslanDisplay.ttf fonts/PlayfairDisplay.ttf fonts/Cormorant.ttf fonts/Lobster.ttf \
-            --steps 400 --tag r20_real 2>&1 | tee r20_train.log
+          cd training && mkdir -p fonts_extra
+          # фриварные манга-леттеринг шрифты с Диска юзера (не коммитим в публичный репо)
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
+          python3 -c "import sys;[sys.exit(2) if __import__('os').path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
+          python3 finetune_chain.py \
+            --inp base_r18.onnx --out best_r21_manga.onnx \
+            --font fonts_extra/AnimeAceCyr.ttf --p 0.16 \
+            --prev fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf fonts/YanoneKaffeesatz.ttf fonts/Oswald.ttf fonts/Play-Bold.ttf fonts/RobotoCondensed.ttf fonts/AmaticSC-Bold.ttf fonts/Underdog.ttf fonts/KellySlab.ttf fonts/RuslanDisplay.ttf \
+            --steps 1000 --tag r21_manga 2>&1 | tee r21_train.log
 
       - name: Hash
         id: hash
-        run: echo "sha=$(md5sum training/best_r20_real.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(md5sum training/best_r21_manga.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload r14 to release v1.0.0
         uses: softprops/action-gh-release@v2
@@ -73,13 +78,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.0
-          files: training/best_r20_real.onnx
+          files: training/best_r21_manga.onnx
 
       - name: Upload training log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: r20-train-log
-          path: training/r20_train.log
+          name: r21-train-log
+          path: training/r21_train.log
 
   build_apk:
     needs: train_r13
@@ -107,7 +112,7 @@ jobs:
       - name: Download r13 (from train job release upload) & put into APK assets + bump version
         run: |
           curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r18_italic.onnx" -o app/src/main/assets/best.onnx
-          sed -i 's/versionCode 1/versionCode 9/; s/versionName "1.0"/versionName "1.8"/' app/build.gradle
+          sed -i 's/versionCode 1/versionCode 10/; s/versionName "1.0"/versionName "1.9"/' app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
 
       - name: Build release APK
@@ -137,11 +142,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.8.0
+          tag_name: v1.9.0
           name: OCR чат v1.8.0
           body: |
-            **OCR-chat-v1.8.apk** — цикл 6: встроена **r18_italic** (лучшая по скору 0.680 на 51 GT-строке): r19 показал деградацию от агрессивного real-микса, r20 (real 6%, 400 шагов) лежит в релизе v1.0.0 отдельным файлом для опытов через кнопку 📦.
-            Модели r0–r20 отдельными файлами см. в релизе v1.0.0.
+            **OCR-chat-v1.8.apk** — цикл 6: встроена **r18_italic** (0.680/1.0 на 51 GT-строке); r21_manga (аниме-леттеринг шрифты AnimeAce/Manga/Comics Cyrillic) лежит в релизе v1.0.0 для проверки через кнопку 📦.
+            Модели r0–r21 отдельными файлами см. в релизе v1.0.0.
           files: |
             OCR-chat-v1.8.apk
 
