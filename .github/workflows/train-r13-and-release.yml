@@ -1,4 +1,4 @@
-name: Train r25 (латиница 111→163, градиент-ауг, 1500 шагов) & APK v1.9.4 с r22
+name: Train r26 (+2500 шагов восстановления кириллицы) & APK v1.9.5
 
 on:
   workflow_dispatch: {}
@@ -51,8 +51,8 @@ jobs:
 
       - name: Download r13 from release
         run: |
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r22_manga.onnx" -o training/base_r22.onnx
-          ls -la training/base_r22.onnx
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r25_lat.onnx" -o training/base_r25.onnx
+          ls -la training/base_r25.onnx
 
       - name: Train r19 (1200 steps, 25% реальные строки со скринов юзера)
         run: |
@@ -63,14 +63,14 @@ jobs:
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
           python3 -c "import sys;[sys.exit(2) if __import__('os').path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
           python3 finetune_chain.py \
-            --inp base_r22.onnx --out best_r25_lat.onnx \
+            --inp base_r25.onnx --out best_r26_lat.onnx \
             --font fonts_extra/AnimeAceCyr.ttf --p 0.16 \
             --prev fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf fonts/YanoneKaffeesatz.ttf fonts/Oswald.ttf fonts/Play-Bold.ttf fonts/RobotoCondensed.ttf fonts/AmaticSC-Bold.ttf fonts/Underdog.ttf fonts/KellySlab.ttf fonts/RuslanDisplay.ttf \
-            --steps 1500 --tag r25_lat 2>&1 | tee r25_train.log
+            --steps 2500 --tag r26_lat 2>&1 | tee r26_train.log
 
       - name: Hash
         id: hash
-        run: echo "sha=$(md5sum training/best_r21_manga_v1.onnx 2>/dev/null || md5sum training/best_r25_lat.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "sha=$(md5sum training/best_r21_manga_v1.onnx 2>/dev/null || md5sum training/best_r26_lat.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload r14 to release v1.0.0
         uses: softprops/action-gh-release@v2
@@ -78,13 +78,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.0
-          files: training/best_r25_lat.onnx
+          files: training/best_r26_lat.onnx
 
       - name: Upload training log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: r25-train-log
-          path: training/r25_train.log
+          name: r26-train-log
+          path: training/r26_train.log
 
   build_apk:
     needs: train_r13
@@ -112,7 +112,7 @@ jobs:
       - name: Download r13 (from train job release upload) & put into APK assets + bump version
         run: |
           curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r22_manga.onnx" -o app/src/main/assets/best.onnx
-          sed -i 's/versionCode 1/versionCode 14/; s/versionName "1.0"/versionName "1.9.4"/' app/build.gradle
+          sed -i 's/versionCode 1/versionCode 15/; s/versionName "1.0"/versionName "1.9.5"/' app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
 
       - name: Build release APK
@@ -122,39 +122,39 @@ jobs:
 
       - name: Sign APK (debug key from ci/)
         run: |
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.9.4.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.9.4.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.9.4.apk | head -2
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.9.5.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.9.5.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.9.5.apk | head -2
 
       - name: APK hash
         id: apkhash
-        run: echo "md5=$(md5sum OCR-chat-v1.9.4.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "md5=$(md5sum OCR-chat-v1.9.5.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Tag v1.9.4 on this commit
+      - name: Tag v1.9.5 on this commit
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git tag -a v1.9.4 -m "v1.9.4 — APK на r22_manga (0.731); r25_lat (+латиница, +градиент-ауг) в v1.0.0"
-          git push origin v1.9.4
+          git tag -a v1.9.5 -m "v1.9.5 — APK на r22_manga (0.731); r25/r26 (латиница) в v1.0.0"
+          git push origin v1.9.5
 
-      - name: Release v1.9.4 (APK + all models from v1.0.0)
+      - name: Release v1.9.5 (APK + all models from v1.0.0)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.9.4
-          name: OCR чат v1.9.4
+          tag_name: v1.9.5
+          name: OCR чат v1.9.5
           body: |
-            **OCR-chat-v1.9.4.apk** — цикл 11: встроена по-прежнему **r22_manga** (0.731/1.0 на 51 GT-строке); r25_lat (латиница в алфавите, 1500 шагов от r22) лежит в релизе v1.0.0 для проверки через кнопку 📦.
-            Модели r0–r25 отдельными файлами см. в релизе v1.0.0.
+            **OCR-chat-v1.9.5.apk** — цикл 12: встроена по-прежнему **r22_manga** (0.731/1.0 на 51 GT-строке); r26_lat (+2500 шагов от r25: восстановка кириллицы) лежит в релизе v1.0.0 для проверки через кнопку 📦.
+            Модели r0–r26 отдельными файлами см. в релизе v1.0.0.
           files: |
-            OCR-chat-v1.9.4.apk
+            OCR-chat-v1.9.5.apk
 
       - name: Upload APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: OCR-chat-v1.9.4.apk
-          path: OCR-chat-v1.9.4.apk
+          name: OCR-chat-v1.9.5.apk
+          path: OCR-chat-v1.9.5.apk
 
       - name: Print summary
         run: |
