@@ -180,23 +180,38 @@ class OcrEngine(modelBytes: ByteArray) {
                 // лёгкий паддинг, чтобы не резать первую/последнюю букву
                 val x0 = max(ix, ix + r[0] - 2); val y0 = max(iy, iy + r[1] - 1)
                 val x1 = min(ix + iw, ix + r[0] + r[2] + 2); val y1 = min(iy + ih, iy + r[1] + r[3] + 1)
-                out.add(intArrayOf(x0, y0, x1 - x0, y1 - y0, if (pol) 1 else 0))
+                out.add(intArrayOf(x0, y0, x1 - x0, y1 - y0, if (pol) 1 else 0, 0))
             }
         }
-        // остаточный полностраничный проход (статус-бары и пр.), минус гигантские склейки арта
+        // остаточный полностраничный проход; гигантские склейки разбираем полосами (контейнеры)
         for (b in segment(px, w, h, dark)) {
-            if (b[3] > h * 6 / 100 || b[2] * b[3] * 12 > w * h) continue
             val cx = b[0] + b[2] / 2; val cy = b[1] + b[3] / 2
             var inside = false
             for (bb in bubbles) {
                 if (cx >= bb[0] && cx < bb[0] + bb[2] && cy >= bb[1] && cy < bb[1] + bb[3]) { inside = true; break }
             }
-            if (!inside) out.add(intArrayOf(b[0], b[1], b[2], b[3], if (dark) 1 else 0))
+            if (inside) continue
+            if (b[3] > h * 6 / 100 || b[2] * b[3] * 12 > w * h) {
+                // v1.6: контейнер (логотип/арт) — не OCR целиком, а строки-полосы внутри
+                if (b[2] < 40 || b[3] < 40) continue
+                val ix = min(b[0] + 4, w - 1); val iy = min(b[1] + 4, h - 1)
+                val iw = min(b[2] - 8, w - ix); val ih = min(b[3] - 8, h - iy)
+                if (iw < 20 || ih < 12) continue
+                val sub = IntArray(iw * ih)
+                for (yy in 0 until ih) System.arraycopy(px, (iy + yy) * w + ix, sub, yy * iw, iw)
+                for (r in bubbleLines(sub, iw, ih, dark)) {
+                    val x0 = max(ix, ix + r[0] - 2); val y0 = max(iy, iy + r[1] - 1)
+                    val x1 = min(ix + iw, ix + r[0] + r[2] + 2); val y1 = min(iy + ih, iy + r[1] + r[3] + 1)
+                    out.add(intArrayOf(x0, y0, x1 - x0, y1 - y0, if (dark) 1 else 0, 2))
+                }
+                continue
+            }
+            out.add(intArrayOf(b[0], b[1], b[2], b[3], if (dark) 1 else 0, 1))
         }
-        out.sortWith(compareBy({ it[1] }, { it[0] }))
-        // дедуп: почти совпадающие боксы (баллонная строка vs остаточный проход)
+        // приоритетный дедуп: баллоны(0) > строки(1) > контейнерные полосы(2), обратно в 5 элементов
+        val sorted = out.sortedWith(compareBy({ it[5] }, { it[1] }, { it[0] }))
         val ded = ArrayList<IntArray>()
-        for (b in out) {
+        for (b in sorted) {
             var dup = false
             for (d in ded) {
                 val ix2 = minOf(b[0] + b[2], d[0] + d[2]) - maxOf(b[0], d[0])
@@ -206,7 +221,10 @@ class OcrEngine(modelBytes: ByteArray) {
             }
             if (!dup) ded.add(b)
         }
-        return ded
+        ded.sortWith(compareBy({ it[1] }, { it[0] }))
+        val final = ArrayList<IntArray>(ded.size)
+        for (b in ded) final.add(intArrayOf(b[0], b[1], b[2], b[3], b[4]))
+        return final
     }
 
     /** Однотонные баллоны: СЫРЫЕ компоненты (замыкание тут вредно — склеивает с бордюрами

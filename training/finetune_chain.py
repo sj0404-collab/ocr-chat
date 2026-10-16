@@ -53,9 +53,9 @@ def gen_line(rng):
     if rng.random() < 0.5: s = s.capitalize()
     if rng.random() < 0.3: s = s.upper()
     if rng.random() < 0.5: s += rng.choice(['.', '!', '?', '…', '—', ''])
-    if rng.random() < 0.15:  # дефисный конец строки (перенос в манге: «ВЫ-», «УНИВЕР-»)
+    if rng.random() < 0.04:  # дефисный конец строки (перенос в манге: «ВЫ-», «УНИВЕР-»)
         s = s.rstrip(' .,!?…') + '-'
-    if rng.random() < 0.15:  # дефис внутри длинного слова (мягкий перенос)
+    if rng.random() < 0.04:  # дефис внутри длинного слова (мягкий перенос)
         words = s.split()
         long_w = [i for i, wd in enumerate(words) if len(wd) > 5]
         if long_w:
@@ -84,6 +84,12 @@ def render(s, rng, fpath):
         d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink)
     if rng.random() < 0.35: img = img.filter(ImageFilter.GaussianBlur(rng.random()*0.8))
     if rng.random() < 0.35: img = img.rotate(rng.uniform(-1.2, 1.2), expand=False, fillcolor=bg)
+    if rng.random() < 0.4:  # JPEG-артефакты манга-скриншотов
+        import io
+        buf = io.BytesIO()
+        img.save(buf, 'JPEG', quality=rng.randint(55, 95))
+        buf.seek(0)
+        img = Image.open(buf).convert('L')
     nw = max(8, min(440, round(img.width * (32 / img.height))))
     return img.resize((nw, 32), Image.BILINEAR)
 

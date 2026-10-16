@@ -173,18 +173,29 @@ def segment_any(lum, dark):
         for (sx, sy, sw2, sh2) in bubble_lines(sub, pol):
             x0 = max(ix, ix + sx - 2); y0 = max(iy, iy + sy - 1)
             x1 = min(ix + iw, ix + sx + sw2 + 2); y1 = min(iy + ih, iy + sy + sh2 + 1)
-            out.append((x0, y0, x1 - x0, y1 - y0, pol))
+            out.append((x0, y0, x1 - x0, y1 - y0, pol, 0))
     bubble_boxes = [(bx, by, bbw, bbh) for (bx, by, bbw, bbh, _) in bubbles]
     for (x, y, bw, bh) in segment(lum, dark):
-        if bh > h * 0.06 or bw * bh * 12 > w * h: continue
         cx, cy = x + bw // 2, y + bh // 2
         if any(bx <= cx < bx + bbw and by <= cy < by + bbh for (bx, by, bbw, bbh) in bubble_boxes):
             continue
-        out.append((x, y, bw, bh, dark))
-    # дедуп: бокс из остаточного прохода, почти совпадающий с баллонной строкой, отбрасываем
+        if bh > h * 0.06 or bw * bh * 12 > w * h:
+            # v1.6: гигантскую склейку не OCR-им, а разбираем полосами (логотипы/титры внутри)
+            if bw < 40 or bh < 40: continue
+            ix = min(x + 4, w - 1); iy = min(y + 4, h - 1)
+            iw = min(bw - 8, w - ix); ih = min(bh - 8, h - iy)
+            if iw < 20 or ih < 12: continue
+            sub = lum[iy:iy + ih, ix:ix + iw]
+            for (sx, sy, sw2, sh2) in bubble_lines(sub, dark):
+                x0 = max(ix, ix + sx - 2); y0 = max(iy, iy + sy - 1)
+                x1 = min(ix + iw, ix + sx + sw2 + 2); y1 = min(iy + ih, iy + sy + sh2 + 1)
+                out.append((x0, y0, x1 - x0, y1 - y0, dark, 2))
+            continue
+        out.append((x, y, bw, bh, dark, 1))
+    # дедуп: при равном перекрытии живёт более приоритетный источник (баллоны > строки > контейнеры)
     ded = []
-    for b in sorted(out, key=lambda b: (b[1], b[0])):
-        x, y, bw, bh, pol = b
+    for b in sorted(out, key=lambda b: (b[5], b[1], b[0])):
+        x, y, bw, bh = b[0], b[1], b[2], b[3]
         dup = False
         for d in ded:
             ox, oy = max(x, d[0]), max(y, d[1])
@@ -193,7 +204,8 @@ def segment_any(lum, dark):
             if inter > 0.6 * bw * bh or inter > 0.6 * d[2] * d[3]:
                 dup = True; break
         if not dup: ded.append(b)
-    return ded
+    ded2 = sorted(ded, key=lambda b: (b[1], b[0]))
+    return [b[:5] for b in ded2]
 
 def decode(raw):
     raw = raw[0]
