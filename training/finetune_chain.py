@@ -53,6 +53,16 @@ def gen_line(rng):
     if rng.random() < 0.5: s = s.capitalize()
     if rng.random() < 0.3: s = s.upper()
     if rng.random() < 0.5: s += rng.choice(['.', '!', '?', '…', '—', ''])
+    if rng.random() < 0.15:  # дефисный конец строки (перенос в манге: «ВЫ-», «УНИВЕР-»)
+        s = s.rstrip(' .,!?…') + '-'
+    if rng.random() < 0.15:  # дефис внутри длинного слова (мягкий перенос)
+        words = s.split()
+        long_w = [i for i, wd in enumerate(words) if len(wd) > 5]
+        if long_w:
+            i = rng.choice(long_w)
+            k = rng.randint(3, len(words[i]) - 2)
+            words[i] = words[i][:k] + '-' + words[i][k:]
+            s = ' '.join(words)
     if rng.random() < 0.2: s = s.replace(' ', ', ', 1)
     if rng.random() < 0.2: s = f'{rng.randint(1, 999)} {s}'
     return s[:48]

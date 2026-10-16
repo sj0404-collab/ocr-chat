@@ -231,11 +231,11 @@ def main(path, model_path='/tmp/r13.onnx', dump_dir=None):
     for idx, (x, y, bw, bh, pol) in enumerate(boxes):
         sw = min(bw, page.size[0] - x); sh = min(bh, page.size[1] - y)
         if sw <= 0 or sh <= 0: continue
-        new_w = max(8, round(sw * LINE_H / sh)); new_w = min(448, new_w)
-        pad_w = math.ceil(new_w / 8) * 8
+        new_w = max(8, round(sw * LINE_H / sh)); new_w = min(444, new_w)
+        pad_w = math.ceil((new_w + 4) / 8) * 8
         line = Image.new('RGB', (pad_w, LINE_H), (255, 255, 255))
         crop = page.crop((x, y, x + sw, y + sh)).resize((new_w, LINE_H), Image.LANCZOS)
-        line.paste(crop, (0, 0))
+        line.paste(crop, (4, 0))  # левый белый пад 4px, как в тренировочном рендере
         lpix = luma_px(np.asarray(line)).astype(np.float32) / 255.0
         if pol: lpix = 1.0 - lpix
         if dump_dir:

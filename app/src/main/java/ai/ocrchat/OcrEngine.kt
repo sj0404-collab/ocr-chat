@@ -364,13 +364,14 @@ class OcrEngine(modelBytes: ByteArray) {
         if (sw <= 0 || sh <= 0) return null
 
         var newW = max(8, (sw * LINE_H.toFloat() / sh).roundToInt())
-        newW = min(448, newW)
-        val paddedW = ceil(newW / 8f).toInt() * 8
+        newW = min(444, newW)
+        // левый белый пад 4px — как в тренировочном рендере (первая буква не касается края)
+        val paddedW = ceil((newW + 4) / 8f).toInt() * 8
 
         val line = Bitmap.createBitmap(paddedW, LINE_H, Bitmap.Config.ARGB_8888)
         val c = Canvas(line)
         c.drawColor(Color.WHITE)
-        val dst = android.graphics.RectF(0f, 0f, newW.toFloat(), LINE_H.toFloat())
+        val dst = android.graphics.RectF(4f, 0f, newW.toFloat() + 4f, LINE_H.toFloat())
         c.drawBitmap(page, android.graphics.Rect(sx, sy, sx + sw, sy + sh), dst, null)
 
         val px = IntArray(LINE_H * paddedW)
