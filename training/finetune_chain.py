@@ -116,12 +116,38 @@ def pick_font(rng, mix):
         if r < acc: return fpath
     return mix[-1][0]
 
-def make_batch(rng, bs, mix, seedlabel=None):
+REAL_ITEMS = []  # [(array 1x32xW float32, text)]
+
+def load_real(realdir):
+    import json as _json
+    recs = _json.load(open(f'{realdir}/real.json'))
+    for r in recs:
+        img = Image.open(f"{realdir}/images/{r['img']}").convert('L')
+        crop = img.crop((r['x'], r['y'], r['x'] + r['w'], r['y'] + r['h']))
+        nw = max(8, min(440, round(crop.width * (32 / crop.height))))
+        crop = crop.resize((nw, 32), Image.BILINEAR)
+        a2 = np.asarray(crop, np.float32) / 255.0
+        if r['pol'] == 1: a2 = 1.0 - a2
+        REAL_ITEMS.append((a2[None, :, :], r['text']))
+    print(f"real: {len(REAL_ITEMS)} lines loaded")
+
+def real_to_canvas(a2, rng):
+    w = a2.shape[1]
+    paddedW = min(448, ((w + 7) // 8) * 8)
+    x = np.ones((1, 32, paddedW), np.float32)
+    x[0, :, :min(w, paddedW)] = a2[0, :, :min(w, paddedW)]
+    return x
+
+def make_batch(rng, bs, mix, seedlabel=None, real_p=0.0):
     xs, ys, ylens, ws = [], [], [], []
     for _ in range(bs):
-        s = gen_line(rng)
-        img = render(s, rng, pick_font(rng, mix))
-        xs.append(to_canvas(img, rng))
+        if REAL_ITEMS and rng.random() < real_p:
+            a2, s = REAL_ITEMS[rng.randrange(len(REAL_ITEMS))]
+            xs.append(real_to_canvas(a2, rng))
+        else:
+            s = gen_line(rng)
+            img = render(s, rng, pick_font(rng, mix))
+            xs.append(to_canvas(img, rng))
         lab = [C2I[c] for c in s if c in C2I]
         ys.append(lab); ylens.append(len(lab)); ws.append(xs[-1].shape[2])
     maxw = max(x.shape[2] for x in xs)
@@ -216,8 +242,11 @@ def main():
     ap.add_argument('--font', required=True); ap.add_argument('--p', type=float, default=0.45)
     ap.add_argument('--prev', nargs='*', default=[], help='anti-forget fonts (each p=(1-p_target-0.1)/n)')
     ap.add_argument('--steps', type=int, default=900); ap.add_argument('--bs', type=int, default=16)
+    ap.add_argument('--realdir', default='', help='папка с real.json + images/')
+    ap.add_argument('--realp', type=float, default=0.25, help='доля реальных строк в батче')
     ap.add_argument('--tag', default='stage'); ap.add_argument('--seed', type=int, default=42)
     a = ap.parse_args()
+    if a.realdir: load_real(a.realdir)
     torch.set_num_threads(2); torch.manual_seed(a.seed)
     mix = [(a.font, a.p)]
     if a.prev:
@@ -237,7 +266,7 @@ def main():
     opt = torch.optim.AdamW(net.parameters(), lr=5e-5, weight_decay=1e-5)
     t0 = time.time()
     for step in range(1, a.steps + 1):
-        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix)
+        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix, real_p=a.realp)
         logit = net(torch.from_numpy(xb)).permute(1, 0, 2).log_softmax(-1)
         T = logit.shape[0]
         lens = torch.tensor([max(1, min(T, round(T * ws[i] / maxw))) for i in range(a.bs)])
