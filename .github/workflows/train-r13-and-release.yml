@@ -56,7 +56,7 @@ jobs:
 
       - name: Train r19 (1200 steps, 25% реальные строки со скринов юзера)
         run: |
-          cd training && mkdir -p fonts_extra
+          cd training && set -o pipefail && mkdir -p fonts_extra
           # фриварные манга-леттеринг шрифты с Диска юзера (не коммитим в публичный репо)
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
