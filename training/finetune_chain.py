@@ -281,8 +281,9 @@ def load_chain(model, path):
         x = np.random.rand(1, 1, 32, 64).astype(np.float32)
         ref = sess.run(None, {'x': x})[0]
         with torch.no_grad(): out = model(torch.from_numpy(x)).numpy()
-        n_cmp = min(out.shape[-1], ref.shape[-1])
-        d = np.abs(out.reshape(-1, n_cmp) - ref.reshape(-1, ref.shape[-1])[:, :n_cmp].reshape(-1, n_cmp)).max()
+        o = out.reshape(-1, out.shape[-1]); r_ = ref.reshape(-1, ref.shape[-1])
+        n_cmp = min(o.shape[1], r_.shape[1])
+        d = np.abs(o[:, :n_cmp] - r_[:, :n_cmp]).max()
         if d < 1e-4:
             print(f'load_chain gates={mode} OK (max|diff|={d:.2e})', flush=True)
             break
