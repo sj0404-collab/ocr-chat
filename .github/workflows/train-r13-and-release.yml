@@ -1,0 +1,143 @@
+name: Train r13 (all-fonts) & build+release APK v1.1
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  train_r13:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.hash.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ML deps (CPU torch)
+        run: pip install --no-cache-dir "torch==2.4.*" --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir onnx onnxruntime pillow
+
+      - name: Fetch fonts from google/fonts (OFL, cyrillic)
+        run: |
+          mkdir -p training/fonts
+          cd training/fonts
+          G="https://raw.githubusercontent.com/google/fonts/main/ofl"
+          curl -sfL --retry 3 "$G/marckscript/MarckScript-Regular.ttf" -o MarckScript.ttf
+          curl -sfL --retry 3 "$G/badscript/BadScript-Regular.ttf" -o BadScript.ttf
+          curl -sfL --retry 3 "$G/pacifico/Pacifico-Regular.ttf" -o Pacifico.ttf
+          curl -sfL --retry 3 "$G/caveat/Caveat%5Bwght%5D.ttf" -o Caveat.ttf
+          curl -sfL --retry 3 "$G/neucha/Neucha.ttf" -o Neucha.ttf
+          curl -sfL --retry 3 "$G/underdog/Underdog-Regular.ttf" -o Underdog.ttf
+          curl -sfL --retry 3 "$G/kellyslab/KellySlab-Regular.ttf" -o KellySlab.ttf
+          ls -la
+
+      - name: Install DejaVu fonts (augmentation baseline)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra
+
+      - name: Download r12 from release
+        run: |
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r12_kellyslab.onnx" -o training/base_r12.onnx
+          ls -la training/base_r12.onnx
+
+      - name: Patch finetune_chain to use prebuilt r13 config (1200 steps, mix of 7 fonts + DejaVu)
+        run: |
+          cd training && python3 finetune_chain.py \
+            --inp base_r12.onnx --out best_r13_allfonts.onnx \
+            --font fonts/Caveat.ttf --p 0.16 \
+            --prev fonts/MarckScript.ttf fonts/BadScript.ttf fonts/Pacifico.ttf fonts/Neucha.ttf fonts/Underdog.ttf fonts/KellySlab.ttf \
+            --steps 1200 --tag r13_allfonts 2>&1 | tee r13_train.log
+
+      - name: Hash
+        id: hash
+        run: echo "sha=$(md5sum training/best_r13_allfonts.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload r13 to release v1.0.0
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.0
+          files: training/best_r13_allfonts.onnx
+
+      - name: Upload training log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r13-train-log
+          path: training/r13_train.log
+
+  build_apk:
+    needs: train_r13
+    runs-on: ubuntu-latest
+    outputs:
+      apk_md5: ${{ steps.apkhash.outputs.md5 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Download r13 (from train job release upload) & put into APK assets + bump version
+        run: |
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r13_allfonts.onnx" -o app/src/main/assets/best.onnx
+          sed -i 's/versionCode 1/versionCode 2/; s/versionName "1.0"/versionName "1.1"/' app/build.gradle
+          grep -E "versionCode|versionName" app/build.gradle
+
+      - name: Build release APK
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle --no-daemon assembleRelease
+
+      - name: Sign APK (debug key from ci/)
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.1.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.1.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.1.apk | head -2
+
+      - name: APK hash
+        id: apkhash
+        run: echo "md5=$(md5sum OCR-chat-v1.1.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag v1.1.0 on this commit
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
+          git tag -a v1.1.0 -m "v1.1.0 — авто-инверсия тёмных страниц + модель r13 (все шрифты)"
+          git push origin v1.1.0
+
+      - name: Release v1.1.0 (APK + all models from v1.0.0)
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.1.0
+          name: OCR чат v1.1.0
+          body: |
+            **OCR-chat-v1.1.apk** — авто-инверсия тёмных страниц (скриншоты тёмных UI больше не сливаются в одну строку «Э») + в APK встроена **r13_allfonts** — модель, дообученная цепочкой на всех 7 шрифтах (gothic, Marck, BadScript, Pacifico, Caveat, Neucha, Underdog, KellySlab) + DejaVu.
+            Модели r0–r13 отдельными файлами см. в релизе v1.0.0.
+          files: |
+            OCR-chat-v1.1.apk
+
+      - name: Upload APK artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: OCR-chat-v1.1.apk
+          path: OCR-chat-v1.1.apk
+
+      - name: Print summary
+        run: |
+          echo "r13 md5: ${{ needs.train_r13.outputs.sha }}"
+          echo "APK md5: ${{ steps.apkhash.outputs.md5 }}"
