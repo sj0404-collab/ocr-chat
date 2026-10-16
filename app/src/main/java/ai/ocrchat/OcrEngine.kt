@@ -82,6 +82,28 @@ class OcrEngine(modelBytes: ByteArray) {
             val line = readLine(page, b[0], b[1], b[2], b[3], b[4] == 1) ?: continue
             if (line.text.isNotBlank()) lines.add(line)
         }
+        // --- гибрид: латинские строки отдаём ML Kit, кириллица остаётся за CRNN ---
+        for (ml in MlKitLatin.detect(page)) {
+            var best = -1; var bestShare = 0f
+            for (i in lines.indices) {
+                val l = lines[i]
+                val iw = min(l.x + l.w, ml.x + ml.w) - max(l.x, ml.x)
+                val ih = min(l.y + l.h, ml.y + ml.h) - max(l.y, ml.y)
+                val inter = (max(0, iw) * max(0, ih)).toFloat()
+                val share = inter / max(1, min(l.w * l.h, ml.w * ml.h))
+                if (share > 0.35f && share > bestShare) { best = i; bestShare = share }
+            }
+            if (best >= 0) {
+                val l = lines[best]
+                // не трогаем уверенные (conf>=0.6) кириллические строки — ML Kit кодирует
+                // кириллицу в лат-абракадабру как шум, которую мы отсекаем по уверенности нашей модели
+                if (l.conf < 0.6f || l.text.contains('�'))
+                    lines[best] = OcrLine(l.x, l.y, l.w, l.h, ml.text, 1f)
+            } else {
+                lines.add(OcrLine(ml.x, ml.y, ml.w, ml.h, ml.text, 1f))
+            }
+        }
+        lines.sortWith(compareBy<OcrLine> { it.y }.thenBy { it.x })
         return OcrResult(lines, annotate(page, lines), System.currentTimeMillis() - t0)
     }
 
