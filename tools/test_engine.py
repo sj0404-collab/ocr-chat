@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Точный порт OcrEngine.kt v1.4 (darkPage + комикс-баллоны: сырые блобы, строки-полосы)."""
+"""Точный порт OcrEngine.kt v1.5 (баллоны на любых страницах + остаточный проход, лимит 1500 компонентов)."""
 import sys, math
 import numpy as np
 from PIL import Image
@@ -63,7 +63,7 @@ def components(mask, with_count=False):
         bw, bh = x1 - x0 + 1, y1 - y0 + 1
         if bh >= 10 and bw >= 12:
             out.append([x0, y0, bw, bh, cnt] if with_count else [x0, y0, bw, bh])
-            if len(out) >= 300: return out
+            if len(out) >= 1500: return out
         cid += 1
     return out
 
@@ -158,10 +158,10 @@ def bubble_lines(sub, pol):
     return rows
 
 def segment_any(lum, dark):
-    """v1.4: тёмная страница -> баллоны обеих полярностей (строки-полосы) + остаточный
-    полностраничный проход без гигантского мусора. 5-й элемент = полярность инверсии."""
-    if not dark:
-        return [(x, y, bw, bh, False) for (x, y, bw, bh) in segment(lum, False)]
+    """v1.5: баллоны на ЛЮБОЙ странице (чёрные l<45, белые l>210; строки-полосы внутри,
+    полярность — от типа баллона) + остаточный полностраничный проход (со своей
+    полярностью страницы) с отсечкой гигантских склеек арта и дублей баллонов.
+    5-й элемент бокса = полярность инверсии яркости."""
     h, w = lum.shape
     out = []
     bubbles = find_bubbles(lum, True) + find_bubbles(lum, False)
@@ -175,14 +175,25 @@ def segment_any(lum, dark):
             x1 = min(ix + iw, ix + sx + sw2 + 2); y1 = min(iy + ih, iy + sy + sh2 + 1)
             out.append((x0, y0, x1 - x0, y1 - y0, pol))
     bubble_boxes = [(bx, by, bbw, bbh) for (bx, by, bbw, bbh, _) in bubbles]
-    for (x, y, bw, bh) in segment(lum, True):
+    for (x, y, bw, bh) in segment(lum, dark):
         if bh > h * 0.06 or bw * bh * 12 > w * h: continue
         cx, cy = x + bw // 2, y + bh // 2
         if any(bx <= cx < bx + bbw and by <= cy < by + bbh for (bx, by, bbw, bbh) in bubble_boxes):
             continue
-        out.append((x, y, bw, bh, True))
-    out.sort(key=lambda b: (b[1], b[0]))
-    return out
+        out.append((x, y, bw, bh, dark))
+    # дедуп: бокс из остаточного прохода, почти совпадающий с баллонной строкой, отбрасываем
+    ded = []
+    for b in sorted(out, key=lambda b: (b[1], b[0])):
+        x, y, bw, bh, pol = b
+        dup = False
+        for d in ded:
+            ox, oy = max(x, d[0]), max(y, d[1])
+            ix2, iy2 = min(x + bw, d[0] + d[2]), min(y + bh, d[1] + d[3])
+            inter = max(0, ix2 - ox) * max(0, iy2 - oy)
+            if inter > 0.6 * bw * bh or inter > 0.6 * d[2] * d[3]:
+                dup = True; break
+        if not dup: ded.append(b)
+    return ded
 
 def decode(raw):
     raw = raw[0]

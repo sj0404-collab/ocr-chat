@@ -65,7 +65,13 @@ def render(s, rng, fpath):
     img = Image.new('L', (w, h), 250); d = ImageDraw.Draw(img)
     ink, bg = rng.randint(5, 70), rng.randint(225, 255)
     img.paste(bg, (0, 0, w, h))
-    d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink)
+    # glow-аугментация 0.3: серый ореол вокруг тёмных штрихов (~ свечение светлого текста
+    # на чёрном баллоне после инверсии яркости в пайплайне)
+    if rng.random() < 0.3:
+        d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink,
+               stroke_width=rng.randint(1, 3), stroke_fill=rng.randint(80, 200))
+    else:
+        d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink)
     if rng.random() < 0.35: img = img.filter(ImageFilter.GaussianBlur(rng.random()*0.8))
     if rng.random() < 0.35: img = img.rotate(rng.uniform(-1.2, 1.2), expand=False, fillcolor=bg)
     nw = max(8, min(440, round(img.width * (32 / img.height))))

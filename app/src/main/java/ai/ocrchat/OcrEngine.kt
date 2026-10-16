@@ -21,9 +21,9 @@ data class OcrResult(val lines: List<OcrLine>, val annotated: Bitmap, val ms: Lo
 /**
  * Пайплайн = порт OnnxRu из приложения Yomikai:
  * luma<170 → морфозамыкание 25×3 ×2 → компоненты (≥10В/12Ш) → группировка в строки.
- * Тёмные страницы (luma<100): инверсный порог + комикс-баллоны (сырые блобы l<45/l>210,
- * fill>=45%, не у края -> строки-полосы rowsum; кольца контуров и шум режутся BFS);
- * яркость в readLine инвертируется только для полярности своей строки.
+ * Баллоны на любых страницах (сырые блобы l<45/l>210, fill>=45%, не у края): строки-полосы
+ * rowsum внутри (BFS режет кольца контуров и шум <3px), полярность — по типу баллона;
+ * тёмная страница (luma<100): остаток с инверсным порогом; яркость строк инвертится по полярности.
  * readLine: h=32, белый правый пад, luma/255, CTC blank=109/unk=110, softmax-медиана.
  * Все кропы жёстко клампятся в рамки битмапа (защита от "empty range / max<min").
  */
@@ -164,8 +164,8 @@ class OcrEngine(modelBytes: ByteArray) {
     // ---------- v1.4: комикс-баллоны на тёмных страницах ----------
     /** Обёртка: светлая страница = v1.1-сегментация; тёмная = баллоны + остаточный проход.
      *  Каждый бокс имеет 5-й элемент: полярность (1 = светлый текст, инвертировать яркость). */
-    private fun segmentAny(px: IntArray, w: Int, h: Int, dark: Boolean): List<IntArray> {
-        if (!dark) return segment(px, w, h, false).map { intArrayOf(it[0], it[1], it[2], it[3], 0) }
+    private fun segmentAny(px: IntArray, w: Int, h: Int, dark: Boolean): MutableList<IntArray> {
+        // v1.5: баллоны на ЛЮБОЙ странице (белые баллоны с чёрным текстом — и на светлых)
         val out = ArrayList<IntArray>()
         val bubbles = findBubbles(px, w, h, true) + findBubbles(px, w, h, false)
         for (b in bubbles) {
@@ -184,17 +184,29 @@ class OcrEngine(modelBytes: ByteArray) {
             }
         }
         // остаточный полностраничный проход (статус-бары и пр.), минус гигантские склейки арта
-        for (b in segment(px, w, h, true)) {
+        for (b in segment(px, w, h, dark)) {
             if (b[3] > h * 6 / 100 || b[2] * b[3] * 12 > w * h) continue
             val cx = b[0] + b[2] / 2; val cy = b[1] + b[3] / 2
             var inside = false
             for (bb in bubbles) {
                 if (cx >= bb[0] && cx < bb[0] + bb[2] && cy >= bb[1] && cy < bb[1] + bb[3]) { inside = true; break }
             }
-            if (!inside) out.add(intArrayOf(b[0], b[1], b[2], b[3], 1))
+            if (!inside) out.add(intArrayOf(b[0], b[1], b[2], b[3], if (dark) 1 else 0))
         }
         out.sortWith(compareBy({ it[1] }, { it[0] }))
-        return out
+        // дедуп: почти совпадающие боксы (баллонная строка vs остаточный проход)
+        val ded = ArrayList<IntArray>()
+        for (b in out) {
+            var dup = false
+            for (d in ded) {
+                val ix2 = minOf(b[0] + b[2], d[0] + d[2]) - maxOf(b[0], d[0])
+                val iy2 = minOf(b[1] + b[3], d[1] + d[3]) - maxOf(b[1], d[1])
+                val inter = max(0, ix2) * max(0, iy2)
+                if (inter > 0.6 * b[2] * b[3] || inter > 0.6 * d[2] * d[3]) { dup = true; break }
+            }
+            if (!dup) ded.add(b)
+        }
+        return ded
     }
 
     /** Однотонные баллоны: СЫРЫЕ компоненты (замыкание тут вредно — склеивает с бордюрами
@@ -245,7 +257,7 @@ class OcrEngine(modelBytes: ByteArray) {
             }
             val bw = x1 - x0 + 1; val bh = y1 - y0 + 1
             out.add(intArrayOf(x0, y0, bw, bh, tail))
-            if (out.size >= 400) return out
+            if (out.size >= 1500) return out
             id++
         }
         return out
@@ -335,7 +347,7 @@ class OcrEngine(modelBytes: ByteArray) {
             val bh = y1 - y0 + 1
             if (bh >= 10 && bw >= 12) {
                 out.add(intArrayOf(x0, y0, bw, bh))
-                if (out.size >= 300) return out
+                if (out.size >= 1500) return out
             }
             id++
         }
