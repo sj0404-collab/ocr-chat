@@ -122,39 +122,39 @@ jobs:
 
       - name: Sign APK (debug key from ci/)
         run: |
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.8.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.8.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.8.apk | head -2
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.9.1.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.9.1.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.9.1.apk | head -2
 
       - name: APK hash
         id: apkhash
-        run: echo "md5=$(md5sum OCR-chat-v1.8.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "md5=$(md5sum OCR-chat-v1.9.1.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Tag v1.8.0 on this commit
+      - name: Tag v1.9.1 on this commit
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git tag -a v1.8.0 -m "v1.8.0 — APK на лучшей модели r18 (r19 по реал-дате дал регресс, r20 в релизе v1.0.0)"
-          git push origin v1.8.0
+          git tag -a v1.9.1 -m "v1.9.1 — APK на r21_manga, новый рекорд 0.709"
+          git push origin v1.9.1
 
-      - name: Release v1.8.0 (APK + all models from v1.0.0)
+      - name: Release v1.9.1 (APK + all models from v1.0.0)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.9.1
-          name: OCR чат v1.8.0
+          name: OCR чат v1.9.1
           body: |
-            **OCR-chat-v1.8.apk** — цикл 6: встроена **r18_italic** (0.709/1.0 на 51 GT-строке); r22_manga (ещё 1200 шагов того же микса) лежит в релизе v1.0.0 для проверки через кнопку 📦.
+            **OCR-chat-v1.9.1.apk** — цикл 8: встроена **r21_manga** (0.709/1.0 на 51 GT-строке); r22_manga (ещё 1200 шагов того же микса) лежит в релизе v1.0.0 для проверки через кнопку 📦.
             Модели r0–r22 отдельными файлами см. в релизе v1.0.0.
           files: |
-            OCR-chat-v1.8.apk
+            OCR-chat-v1.9.1.apk
 
       - name: Upload APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: OCR-chat-v1.8.apk
-          path: OCR-chat-v1.8.apk
+          name: OCR-chat-v1.9.1.apk
+          path: OCR-chat-v1.9.1.apk
 
       - name: Print summary
         run: |
