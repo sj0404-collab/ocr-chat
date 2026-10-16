@@ -34,7 +34,10 @@ def main(model, fixtures='gt_fixtures.json', updir='uploads'):
             gn += 1
             g_n = norm(g)
             best, best_o = 0.0, ''
-            for o in ocr_n:
+            pool = ocr_n + [ocr_n[i] + ' ' + ocr_n[i+1] for i in range(len(ocr_n)-1)] \
+                    + [(ocr_n[i] + ' ' + ocr_n[i+1]).replace('- ', '') for i in range(len(ocr_n)-1)] \
+                    + [o.replace('- ', '') for o in ocr_n]
+            for o in pool:
                 sim = 1 - lev(g_n, o) / max(1, len(g_n))
                 if sim > best: best, best_o = sim, o
             # GT, покрытый конкатенацией соседних OCR-строк (разбиение), тоже засчитываем
