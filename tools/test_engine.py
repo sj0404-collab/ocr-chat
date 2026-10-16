@@ -110,7 +110,7 @@ def find_bubbles(lum, dark_blob):
     for b in components(raw, with_count=True):
         x, y, bw, bh, cnt = b
         area = bw * bh
-        if bw < 60 or bh < 40 or area < w * h // 50 or area * 2 > w * h: continue
+        if bw < 48 or bh < 28 or area < w * h // 120 or area * 2 > w * h: continue
         if cnt < area * 0.45: continue
         if x == 0 or y == 0 or x + bw == w or y + bh == h: continue
         out.append((x, y, bw, bh, dark_blob))

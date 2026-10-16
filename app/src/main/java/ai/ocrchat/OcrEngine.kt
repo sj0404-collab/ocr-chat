@@ -239,7 +239,7 @@ class OcrEngine(modelBytes: ByteArray) {
         for (b in componentsCnt(raw, w, h)) {
             val bw = b[2]; val bh = b[3]; val cnt = b[4]
             val area = bw * bh
-            if (bw < 60 || bh < 40 || area < w * h / 50 || area * 2 > w * h) continue
+            if (bw < 48 || bh < 28 || area < w * h / 120 || area * 2 > w * h) continue
             if (cnt < area * 45 / 100) continue
             if (b[0] == 0 || b[1] == 0 || b[0] + bw == w || b[1] + bh == h) continue
             out.add(intArrayOf(b[0], b[1], bw, bh, if (darkBlob) 1 else 0))

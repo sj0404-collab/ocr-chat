@@ -84,6 +84,12 @@ def render(s, rng, fpath):
         d.text((4-bbox[0], 4-bbox[1]), s, font=f, fill=ink)
     if rng.random() < 0.35: img = img.filter(ImageFilter.GaussianBlur(rng.random()*0.8))
     if rng.random() < 0.35: img = img.rotate(rng.uniform(-1.2, 1.2), expand=False, fillcolor=bg)
+    if rng.random() < 0.25:  # курсив (аффинный скос ±0.25, титры/звуковые FX манги)
+        sh = rng.uniform(-0.25, 0.25)
+        img = img.transform((img.width, img.height), Image.AFFINE,
+                            (1, sh, 0, 0, 1, 0), fillcolor=bg)
+    if rng.random() < 0.15:  # повёрнутые FX-надписи (±8°)
+        img = img.rotate(rng.uniform(-8, 8), expand=True, fillcolor=bg)
     if rng.random() < 0.4:  # JPEG-артефакты манга-скриншотов
         import io
         buf = io.BytesIO()
