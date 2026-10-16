@@ -52,7 +52,7 @@ jobs:
       - name: Download r13 from release
         run: |
           curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r21_manga.onnx" -o training/base_r21.onnx
-          ls -la training/base_r18.onnx
+          ls -la training/base_r21.onnx
 
       - name: Train r19 (1200 steps, 25% реальные строки со скринов юзера)
         run: |
