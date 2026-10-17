@@ -55,7 +55,7 @@ jobs:
       - name: Download base r28 + freeware manga fonts
         run: |
           cd training && mkdir -p fonts_extra
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r28_final.onnx" -o base_r28.onnx
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r30_final.onnx" -o base_r30.onnx
           # фриварные манга-леттеринг шрифты с Диска юзера (не коммитим в публичный репо)
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
@@ -68,7 +68,7 @@ jobs:
           curl -sfL --retry 3 "$G/forum/Forum-Regular.ttf" -o fonts_extra/Forum.ttf
           curl -sfL --retry 3 "$G/greatvibes/GreatVibes-Regular.ttf" -o fonts_extra/GreatVibes.ttf
           curl -sfL --retry 3 "$G/marmelad/Marmelad-Regular.ttf" -o fonts_extra/Marmelad.ttf
-          python3 -c "import os;[sys.exit(2) if False else None];import sys;[sys.exit(2) if os.path.getsize('fonts_extra/'+f)<20000 else None for f in ['RussoOne.ttf','StalinistOne.ttf','Forum.ttf','GreatVibes.ttf','Marmelad.ttf']]"
+          python3 -c "import sys,os;[sys.exit(2) if os.path.getsize('fonts_extra/'+f)<20000 else None for f in ['RussoOne.ttf','StalinistOne.ttf','Forum.ttf','GreatVibes.ttf','Marmelad.ttf']]"
           ls -la base_r30.onnx
 
       - name: Train r31 final (18k шагов, 25% mined2, SFX-доноры, eval каждые 3k)
