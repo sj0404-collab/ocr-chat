@@ -196,6 +196,32 @@ def to_canvas(img, rng):
 def pick_font(rng, fonts):
     return rng.choice(fonts)
 
+# === АЛФАВИТНАЯ ФАЗА (r30): одиночные буквы + коротыши + SFX ===
+ALPH_RU_U = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
+ALPH_CHARS = (ALPH_RU_U + ALPH_RU_U.lower() + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+              + 'abcdefghijklmnopqrstuvwxyz' + '0123456789')
+SFX_POOL = ['АХ', 'ОХ', 'ЭЙ', 'ОЙ', 'УХ', 'АГА', 'УРА', 'ХА', 'ХА-ХА', 'ХИ-ХИ', 'ТУК', 'ТУК-ТУК',
+            'ТУК ТУК', 'БУМ', 'БАХ', 'БАМ', 'ДЗЫНЬ', 'ДЗИНЬ', 'ТРРР', 'РРР', 'ШШШ', 'СИГ', 'ЧИРП',
+            'ЩЁЛК', 'ХРЯСЬ', 'БАЦ', 'БАРАМ', 'СТОП', 'ХМ', 'ДА', 'НЕТ', 'ЧТО', 'ТАК', 'ВСЁ', 'КАК',
+            'AH', 'OH', 'HEY', 'NO', 'YES', 'GO', 'WOW', 'BANG', 'BOOM', 'SNAP', 'GASP', 'THUD',
+            'DING', 'KA', 'CHI', 'SH', 'CLANG', 'TAP TAP', 'KNOCK KNOCK', 'RUMBLE']
+
+def gen_alphabet(rng):
+    r = rng.random()
+    if r < 0.50:  # одиночный символ
+        ch = rng.choice(ALPH_CHARS)
+        if rng.random() < 0.12: ch += rng.choice(['.', ',', '!', '?', '-', '…', ':'])
+        return ch
+    if r < 0.85:  # коротыши 2–4 знака (сырая стыковка букв, иногда через пробел)
+        n = rng.randint(2, 4)
+        lets = [rng.choice(ALPH_CHARS) for _ in range(n)]
+        s = ''.join(lets)
+        if rng.random() < 0.20: s = ' '.join(lets)
+        if rng.random() < 0.30: s = s.upper()
+        if rng.random() < 0.18: s += rng.choice(['.', ',', '!', '?', '…', '…!'])
+        return s
+    return rng.choice(SFX_POOL)  # готовый звуковик/пары
+
 MINED_ITEMS = []  # [(array 32xW float32, text)] — реальные кропы со скринов с точными метками
 def load_mined(path):
     d = np.load(path, allow_pickle=True)
@@ -217,14 +243,14 @@ def mined_to_canvas(a2, rng):
     x[0, :, :n] = a2[:, :n]
     return x
 
-def make_batch(rng, bs, fonts, minedp=0.0):
+def make_batch(rng, bs, fonts, minedp=0.0, alphp=0.0):
     xs, ys, ylens, ws = [], [], [], []
     for _ in range(bs):
         if MINED_ITEMS and rng.random() < minedp:
             a2, s = MINED_ITEMS[rng.randrange(len(MINED_ITEMS))]
             xs.append(mined_to_canvas(a2, rng))
         else:
-            s = gen_line(rng)
+            s = gen_alphabet(rng) if (alphp > 0 and rng.random() < alphp) else gen_line(rng)
             img = render(s, rng, pick_font(rng, fonts))
             xs.append(to_canvas(img, rng))
         lab = [v for v in ((C2I[c] if c in C2I else (LAT_OFF + LAT.index(c) if c in LAT else -1)) for c in s) if v >= 0]
@@ -356,6 +382,9 @@ def main():
     ap.add_argument('--evalevery', type=int, default=3000)
     ap.add_argument('--mined', default='', help='npz с реальными кропами (tools/mine_real.py)')
     ap.add_argument('--minedp', type=float, default=0.22, help='доля mined-строк в батче')
+    ap.add_argument('--alphfrac', type=float, default=0.33, help='доля шагов: фаза А «алфавит»')
+    ap.add_argument('--alphp', type=float, default=0.40, help='доля одиночек/коротышей в фазе А')
+    ap.add_argument('--alphp2', type=float, default=0.08, help='доля одиночек/коротышей после фазы А')
     ap.add_argument('--timelimit', type=int, default=0, help='секунд; 0 = без лимита')
     ap.add_argument('--lr', type=float, default=6e-5)
     ap.add_argument('--tag', default='final'); ap.add_argument('--seed', type=int, default=42)
@@ -385,7 +414,9 @@ def main():
     if os.path.exists(best_path): os.remove(best_path)
     stop = False
     for step in range(1, a.steps + 1):
-        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix_fonts, minedp=a.minedp)
+        # фаза А: сначала алфавит/коротыши (alphp), фаза B: подстановка под шрифты (alphp2)
+        cur_alphp = a.alphp if step <= a.steps * a.alphfrac else a.alphp2
+        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix_fonts, minedp=a.minedp, alphp=cur_alphp)
         logit = net(torch.from_numpy(xb)).permute(1, 0, 2).log_softmax(-1)
         T = logit.shape[0]
         lens = torch.tensor([max(1, min(T, round(T * ws[i] / maxw))) for i in range(a.bs)])
