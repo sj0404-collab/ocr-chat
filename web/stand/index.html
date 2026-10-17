@@ -3,33 +3,46 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Manga Reader PRO — OCR Стенд (серверный CRNN)</title>
+<title>YomiStand — OCR ридер (наш серверный CRNN)</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Marck+Script&family=Bad+Script&family=Pangolin&family=Neucha&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#121212;--surface:#1e1e1e;--primary:#4CAF50;--secondary:#2196F3;--text:#e0e0e0;--muted:#888;--border:#333;--warn:#ff9800;--bad:#f44336}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden;-webkit-user-select:none;user-select:none}
-.header{background:var(--surface);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
+.header{background:var(--surface);padding:7px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
 .header h1{font-size:13px;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
-select,.btn,label.button{padding:9px 12px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;touch-action:manipulation;white-space:nowrap}
-select{background:var(--surface);border:1px solid #555;max-width:220px}
+select,.btn,label.button{padding:8px 11px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:bold;touch-action:manipulation;white-space:nowrap}
+select{background:var(--surface);border:1px solid #555;max-width:200px}
 .btn.secondary{background:var(--secondary)}
 .btn.outline{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.status{padding:5px 12px;font-size:12px;color:var(--muted);flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.status{padding:4px 12px;font-size:12px;color:var(--muted);flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .main{flex:1;display:flex;overflow:hidden}
 .viewer{flex:1;position:relative;overflow:auto;background:#000;display:flex;align-items:flex-start;justify-content:center;padding:6px}
-canvas{max-width:100%;height:auto;outline:1px solid var(--border)}
-.nav{position:absolute;top:45%;z-index:4;padding:14px 10px;font-size:22px;background:rgba(30,30,30,.7);border:none;color:#fff;border-radius:8px;cursor:pointer}
-.nav.left{left:6px}.nav.right{right:6px}
-.right{width:min(460px,58vw);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
-.panel-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.page{position:relative;display:inline-block}
+canvas{display:block;outline:1px solid var(--border)}
+.nav{position:fixed;top:46%;z-index:4;padding:14px 10px;font-size:22px;background:rgba(30,30,30,.7);border:none;color:#fff;border-radius:8px;cursor:pointer}
+.nav.left{left:8px}.nav.right{right:8px}
+/* ------- Yomikai-оверлей текста поверх страницы ------- */
+.ocrbox{position:absolute;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.12;
+        font-family:'Caveat',cursive;font-weight:700;color:#111;cursor:pointer;overflow:hidden;
+        padding:2px;user-select:text;border-radius:3px;border:1.5px dashed transparent;white-space:pre-wrap;word-break:break-word}
+.ocrbox:hover{border-color:var(--secondary)}
+.ocrbox.hl{border-color:var(--primary);box-shadow:0 0 8px rgba(76,175,80,.5)}
+.right{width:min(430px,56vw);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.panel-head{padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.panel-head .tools{display:flex;gap:5px;flex-wrap:wrap}
+.panel-head select,.panel-head input[type=range]{padding:4px 6px;font-size:11px}
+.panel-head .mini{padding:5px 8px;font-size:11px}
 .lines{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
-.card{background:var(--bg);border-left:3px solid var(--primary);border-radius:6px;padding:8px;font-size:14px}
+.card{background:var(--bg);border-left:3px solid var(--primary);border-radius:6px;padding:8px;font-size:14px;cursor:pointer}
+.card:hover{background:#191919}
 .card .meta{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:3px;gap:6px}
 .card.hit{border-left-color:var(--primary)}.card.close{border-left-color:var(--warn)}.card.miss{border-left-color:var(--bad)}
 .card .gt{font-size:12px;color:var(--warn);margin-top:3px}
-.summary{background:var(--bg);padding:10px 12px;border-top:1px solid var(--border);font-size:13px;line-height:1.6;max-height:45%;overflow-y:auto}
+.summary{background:var(--bg);padding:10px 12px;border-top:1px solid var(--border);font-size:13px;line-height:1.6;max-height:42%;overflow-y:auto}
 .summary b{color:var(--primary)}
 table.results{width:100%;border-collapse:collapse;font-size:11.5px}
 table.results td,th{border:1px solid var(--border);padding:3px 5px;text-align:center}
@@ -40,35 +53,60 @@ table.results th{color:var(--secondary)}
 @keyframes sp{to{transform:rotate(360deg)}}
 input[type=file]{display:none}
 .pageinfo{font-size:12px;color:var(--muted)}
+.font-caveat{font-family:'Caveat',cursive !important}
+.font-marck{font-family:'Marck Script',cursive !important}
+.font-bad{font-family:'Bad Script',cursive !important}
+.font-pangolin{font-family:'Pangolin',cursive !important}
+.font-neucha{font-family:'Neucha',cursive !important}
 @media(max-width:700px){.right{width:100vw;position:fixed;inset:6px;z-index:9;border:1px solid var(--border);border-radius:10px;display:none}.right.open{display:flex}.header h1{max-width:100%}}
 </style>
 </head>
 <body>
 <div class="header">
-    <h1 id="titleHead">📚 Manga Reader — OCR (наш сервер)</h1>
-    <label class="button" for="filePick">📁 Открыть .cbz/.zip/картинку</label><input type="file" id="filePick" accept=".cbz,.zip,image/*">
+    <h1 id="titleHead">📖 YomiStand — OCR ридер</h1>
+    <label class="button" for="filePick">📁 .cbz/.zip/картинка</label><input type="file" id="filePick" accept=".cbz,.zip,image/*">
     <select id="modePick">
         <option value="vertical">⬇ Вебтун</option>
-        <option value="rtl">🔄 Справа (Манга)</option>
-        <option value="ltr">➡ Слева (Комикс)</option>
+        <option value="rtl">🔄 Справа</option>
+        <option value="ltr">➡ Слева</option>
     </select>
     <span class="pageinfo" id="pageInfo"></span>
     <select id="modelPick" title="Модель"></select>
     <select id="screenPick" title="Тест-скрин"></select>
-    <button class="btn secondary" id="btnOcr" disabled>🔍 OCR страницы</button>
-    <button class="btn outline" id="btnAll" disabled>🏁 Все 20</button>
+    <button class="btn secondary" id="btnOcr" disabled>🔍 OCR</button>
+    <button class="btn outline" id="btnAll" disabled>🏁</button>
     <button class="btn outline" id="btnPanel">📋</button>
 </div>
 <div class="progress"><div class="pfill" id="pfill"></div></div>
-<div class="status" id="status">Загружаю список моделей с сервера…</div>
+<div class="status" id="status">Загружаю список моделей…</div>
 <div class="main">
     <div class="viewer" id="viewer">
-        <button class="nav left" id="btnPrev">◀</button>
-        <canvas id="cv"></canvas>
-        <button class="nav right" id="btnNext">▶</button>
+        <div class="page" id="page"><canvas id="cv"></canvas><div id="overlay"></div></div>
     </div>
+    <button class="nav left" id="btnPrev">◀</button>
+    <button class="nav right" id="btnNext">▶</button>
     <div class="right" id="panel">
-        <div class="panel-head"><strong>Строки страницы</strong><span id="liner">—</span></div>
+        <div class="panel-head">
+            <strong id="liner">Строки</strong>
+            <div class="tools">
+                <select id="fontPick" title="Шрифт перевода">
+                    <option value="font-caveat">Caveat</option>
+                    <option value="font-marck">Marck Script</option>
+                    <option value="font-bad">Bad Script</option>
+                    <option value="font-pangolin">Pangolin</option>
+                    <option value="font-neucha">Neucha</option>
+                    <option value="">Системный</option>
+                </select>
+                <select id="bgPick" title="Подложка">
+                    <option value="auto">Авто</option>
+                    <option value="none">Нет</option>
+                    <option value="white">Белая</option>
+                    <option value="dark">Тёмная</option>
+                </select>
+                <button class="btn outline mini" id="btnOverlay" title="Показать/скрыть текст">🅰</button>
+                <button class="btn outline mini" id="btnCopy" title="Копировать весь текст">📄</button>
+            </div>
+        </div>
         <div class="lines" id="lines"></div>
         <div class="summary" id="summary"></div>
     </div>
@@ -78,6 +116,7 @@ input[type=file]{display:none}
 const $ = id => document.getElementById(id);
 const MAX_DIM = 1400;
 let pages = [], pageIdx = 0, currentName = "", busy = false, GT = null, testKey = null, hasImg = false;
+let lastLines = [], overlayOn = true;
 function status(t){ $('status').innerHTML = t; }
 function frac(f){ $('pfill').style.width = (f*100).toFixed(0)+'%'; }
 function norm(s){ s = s.normalize('NFKC').toLowerCase().replaceAll('ё','е'); return s.replace(/[^0-9a-zа-я]+/gu,''); }
@@ -92,29 +131,29 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 /* ---------- init ---------- */
 fetch('/api/models').then(r=>r.json()).then(list=>{
   list.forEach(n=>{const o=document.createElement('option');o.value=n;
-    o.textContent = n.replace('best_','').replace('.onnx','') + (n.includes('sp_distill')?' 🏆':'');
+    o.textContent = n.replace('best_','').replace('.onnx','') + (n.includes('sp_distill2')?' 👑':n.includes('sp_distill')?' 🏆':'');
     if(n==='best_sp_distill.onnx')o.selected=true;
     $('modelPick').appendChild(o);});
-  status('✅ Сервер жив. Откройте .cbz/картинку или выберите тест-скрин');
+  status('✅ Стенд жив. Откройте .cbz/картинку или выберите тест-скрин');
   $('btnOcr').disabled=false; $('btnAll').disabled=false;
-}).catch(()=>{ status('❌ Сервер не отвечает (/api/models). Нужен запущенный стенд-сервер.'); });
+}).catch(()=>{ status('❌ Сервер не отвечает (/api/models).'); });
 fetch('testset/gt20.json').then(r=>r.json()).then(j=>GT=j).catch(()=>{});
 for(let i=1;i<=20;i++){const s='s'+String(i).padStart(2,'0');const o=document.createElement('option');o.value=s;o.textContent='тест '+s;$('screenPick').appendChild(o);}
 
 $('screenPick').onchange = e=>{
   const key = e.target.value; if(!key)return;
   const im = new Image();
-  im.onload = ()=>{ pages=[{name:key, url:im.src, img:im, srv:'testset/'+key}]; pageIdx=0; showCurTest(im, key); };
-  im.onerror = ()=>{ const i2=new Image(); i2.onload=()=>{ pages=[{name:key, url:i2.src, img:i2, srv:'testset/'+key}]; pageIdx=0; showCurTest(i2, key); }; i2.src='testset/'+key+'.jpg'; };
+  im.onload = ()=>{ pages=[{name:key, url:im.src, img:im}]; pageIdx=0; showCurTest(im, key); };
+  im.onerror = ()=>{ const i2=new Image(); i2.onload=()=>{ pages=[{name:key, url:i2.src, img:i2}]; pageIdx=0; showCurTest(i2, key); }; i2.src='testset/'+key+'.jpg'; };
   im.src = 'testset/'+key+'.png';
 };
 function showCurTest(im,key){
   testKey = key; currentName = key;
   drawBase(im); hasImg = true; updInfo();
-  status('Тест-скрин '+key+' — жмите «OCR страницы»');
+  status('Тест-скрин '+key+' — жмите «OCR»');
 }
 
-/* ---------- cbz/zip/image ---------- */
+/* ---------- файлы ---------- */
 $('filePick').onchange = async e=>{
   const f = e.target.files[0]; if(!f)return;
   status('<span class="spin"></span>Открываю '+f.name+' …');
@@ -123,20 +162,17 @@ $('filePick').onchange = async e=>{
     const names = Object.keys(zip.files).filter(n=>/\.(jpe?g|png|webp|gif|bmp)$/i.test(n)&&!/\/\./.test(n));
     names.sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
     pages = [];
-    for(const n of names){
-      const blob = await zip.files[n].async('blob');
-      pages.push({name:n, url:URL.createObjectURL(blob)});
-    }
+    for(const n of names){ const blob = await zip.files[n].async('blob'); pages.push({name:n, url:URL.createObjectURL(blob)}); }
     if(!pages.length){ status('❌ В архиве нет картинок'); return; }
     testKey = null;
-    $('titleHead').textContent = '📚 '+f.name+' ('+pages.length+' стр.)';
+    $('titleHead').textContent = '📖 '+f.name+' ('+pages.length+' стр.)';
     showPage(0);
-    status('✅ '+pages.length+' страниц. Листайте ◀ ▶, жмите «OCR страницы»');
+    status('✅ '+pages.length+' страниц. ◀▶ листать, «OCR» — прочитать страницу');
   } else {
     const im = new Image();
-    im.onload = ()=>{ pages=[{name:f.name,url:im.src}]; pageIdx=0; testKey=null; drawBase(im); hasImg=true; updInfo(); };
+    im.onload = ()=>{ pages=[{name:f.name,url:im.src,img:im}]; pageIdx=0; testKey=null; drawBase(im); hasImg=true; updInfo(); };
     im.src = URL.createObjectURL(f);
-    status('Картинка открыта — жмите «OCR страницы»');
+    status('Картинка открыта — жмите «OCR»');
   }
 };
 function updInfo(){ $('pageInfo').textContent = pages.length>1?('стр. '+(pageIdx+1)+'/'+pages.length):''; }
@@ -144,9 +180,9 @@ function showPage(i){
   if(!pages.length)return;
   pageIdx = (i+pages.length)%pages.length;
   const p = pages[pageIdx];
-  if(p.img){ testKey=p.srv&&/^s\d\d$/.test(p.srv.split('/')[1])?p.srv.split('/')[1]:null; drawBase(p.img); hasImg=true; updInfo(); return; }
+  if(p.img){ drawBase(p.img); hasImg=true; currentName=p.name; updInfo(); $('viewer').scrollTop=0; return; }
   const im = new Image();
-  im.onload = ()=>{ p.img=im; testKey=null; drawBase(im); hasImg=true; $('viewer').scrollTop=0; updInfo(); };
+  im.onload = ()=>{ p.img=im; drawBase(im); hasImg=true; currentName=p.name; $('viewer').scrollTop=0; updInfo(); };
   im.src = p.url;
 }
 function step(d){ if(pages.length<2)return; const rtl=$('modePick').value==='rtl'; showPage(pageIdx+(rtl?-d:d)); }
@@ -161,10 +197,69 @@ function drawBase(im, boxes){
   const W = Math.max(1,Math.round(im.width*sc)), H = Math.max(1,Math.round(im.height*sc));
   c.width = W; c.height = H;
   const g = c.getContext('2d'); g.drawImage(im,0,0,W,H);
+  const ov = $('overlay'); ov.innerHTML='';
+  ov.style.width = W+'px'; ov.style.height = H+'px';
+  ov.style.position='absolute'; ov.style.left='0'; ov.style.top='0';
   if(boxes){ g.lineWidth=2;
     for(const b of boxes){ g.strokeStyle = b.cls==='hit'?'#4CAF50':(b.cls==='close'?'#ff9800':'#2196F3'); g.strokeRect(b.x,b.y,b.w,b.h); }
   }
-  return {g,W,H};
+  return {g,W,H,sc};
+}
+
+/* ---------- Yomikai-оверлей: подгонка текста в боксы ---------- */
+function layoutOverlay(lines){
+  const ov = $('overlay'); ov.innerHTML='';
+  if(!overlayOn) return;
+  const fCls = $('fontPick').value, bgMode = $('bgPick').value;
+  const meas = document.createElement('canvas').getContext('2d');
+  const fontFam = getComputedStyle(fCls? ({}) : {}).fontFamily; // placeholder
+  const probe = document.createElement('span');
+  probe.className = fCls;
+  document.body.appendChild(probe);
+  const fam = getComputedStyle(probe).fontFamily; probe.remove();
+  for(const r of lines){
+    const d = document.createElement('div');
+    d.className = 'ocrbox ' + fCls;
+    d.dataset.i = r.idx;
+    // подложка
+    if(bgMode==='auto') d.style.background = r.pol? 'rgba(20,20,20,0.92)' : 'rgba(255,255,255,0.94)';
+    else if(bgMode==='white') d.style.background = 'rgba(255,255,255,0.94)';
+    else if(bgMode==='dark') d.style.background = 'rgba(20,20,20,0.92)';
+    else d.style.background = 'transparent';
+    d.style.color = (bgMode==='dark' || (bgMode==='auto'&&r.pol)) ? '#eee' : '#111';
+    const bx=Math.max(0,r.x-1), by=Math.max(0,r.y-1), bw=r.w+2, bh=r.h+2;
+    d.style.left = bx+'px'; d.style.top = by+'px';
+    d.style.width = bw+'px'; d.style.height = bh+'px';
+    // автоподбор размера: бинарный поиск по fs, чтобы текст влез в bh
+    const txt = r.text;
+    let lo=6, hi=Math.max(8, bh*1.6), best=6;
+    while(hi-lo>1.5){
+      const fs=(lo+hi)/2;
+      meas.font = '700 '+fs+'px '+fam;
+      const fits = fitText(meas, txt, bw-4, bh-4, fs);
+      if(fits){ best=fs; lo=fs; } else { hi=fs; }
+    }
+    d.style.fontSize = best.toFixed(1)+'px';
+    d.textContent = txt;
+    d.onclick = ()=>{ hlLine(r.idx); $('panel').classList.add('open'); };
+    ov.appendChild(d);
+  }
+}
+function fitText(meas, text, maxW, maxH, fs){
+  // разбивка по словам в строки ≤ maxW; суммарная высота ≤ maxH
+  const words = text.split(/\s+/).filter(Boolean);
+  if(!words.length) return true;
+  const lh = fs*1.12;
+  let lines=1, cur='';
+  for(const w of words){
+    const j = cur? cur+' '+w : w;
+    if(meas.measureText(j).width <= maxW){ cur=j; }
+    else {
+      lines++; cur=w;
+      if(meas.measureText(w).width > maxW) return false;
+    }
+  }
+  return lines*lh <= maxH;
 }
 
 /* ---------- OCR через сервер ---------- */
@@ -175,57 +270,71 @@ async function ocrServer(){
   if(!r.ok) throw new Error('server '+r.status);
   return r.json();
 }
-
 $('btnOcr').onclick = async ()=>{
   if(busy||!hasImg)return; busy=true; $('btnOcr').disabled=true;
   try{
-    status('<span class="spin"></span>ОCR на сервере ('+$('modelPick').value+') …'); frac(0.4);
+    status('<span class="spin"></span>OCR на сервере ('+$('modelPick').value+') …'); frac(0.4);
     const t0 = performance.now();
     const resp = await ocrServer();
     if(resp.error) throw new Error(resp.error);
     frac(1);
-    renderResults(resp.lines, ((performance.now()-t0)/1000).toFixed(1));
+    renderResults(resp.lines, ((performance.now()-t0)/1000).toFixed(1), false);
   }catch(e){ status('❌ '+e.message); }
   busy=false; $('btnOcr').disabled=false;
 };
 
-function renderResults(lines, took){
+function renderResults(lines, took, keepBoxes){
+  lastLines = lines;
   const gtLines = (GT&&testKey&&GT[testKey])?GT[testKey]:null;
   const gtN = gtLines?gtLines.map(norm):null;
   let hits=0,soft=0,softN=0;
-  for(const r of lines){
-    r.sim=null; r.cls='miss';
+  lines.forEach((r,i)=>{
+    r.idx=i; r.sim=null; r.cls='miss';
     if(gtN){const bw=bestWindow(gtN,norm(r.text)); r.sim=bw.sim;
       r.cls = r.sim>=0.999?'hit':(r.sim>=0.75?'close':'miss');
       if(r.sim>=0.999)hits++;
       if(norm(r.text).length>=3){soft+=r.sim;softN++;}
     }
-  }
-  const {W,H}=drawBase(pages[pageIdx]&&pages[pageIdx].img || $('cv').img || currentImage(), lines);
+  });
+  if(keepBoxes) drawBase(pages[pageIdx].img, lines);
+  layoutOverlay(lines);
   const el=$('lines'); el.innerHTML='';
   $('liner').textContent=lines.length+' строк';
   for(const r of lines){
     const d=document.createElement('div'); d.className='card '+(r.sim!=null?r.cls:'');
+    d.dataset.i=r.idx;
     d.innerHTML='<div class="meta"><span>['+r.x+','+r.y+' '+r.w+'×'+r.h+'] pol'+r.pol+'</span><span>conf '+r.conf.toFixed(2)+(r.sim!=null?' · sim '+r.sim.toFixed(2):'')+'</span></div><div>'+esc(r.text)+'</div>'
       +(r.sim!=null&&r.sim<0.999&&gtLines?'<div class="gt">GT ближ.: '+esc(nearestGT(r.text,gtLines))+'</div>':'');
+    d.onclick=()=>hlLine(r.idx);
     el.appendChild(d);
   }
   const acc = gtLines?`<br>GT-попадания: <b>${hits}/${gtLines.length}</b>, SOFT≈${softN?(soft/softN*100).toFixed(0):0}%`:'';
   $('summary').innerHTML=`<b>${$('modelPick').value}</b><br>${currentName}: ${lines.length} строк за ${took||'—'}с${acc}`;
-  $('panel').classList.add('open');
+  if(gtLines)$('panel').classList.add('open');
   status('✅ '+currentName+': '+lines.length+' строк'+(gtLines?`, GT ${hits}/${gtLines.length}`:'')+' за '+(took||'?')+'с');
+}
+function hlLine(i){
+  document.querySelectorAll('.ocrbox').forEach(e=>e.classList.remove('hl'));
+  const b=document.querySelector('.ocrbox[data-i="'+i+'"]');
+  if(b){b.classList.add('hl'); b.scrollIntoView({block:'center',behavior:'smooth'});}
 }
 function nearestGT(t,gtLines){
   let best=null,bs=0;
   for(const g of gtLines){const s=1-lev(norm(t),norm(g))/Math.max(1,norm(g).length); if(s>bs){bs=s;best=g;}}
   return (best&&bs>0.3)?best+' ('+bs.toFixed(2)+')':'—';
 }
-function currentImage(){
-  const c=$('cv'); const im=new Image(); im.width=c.width; im.height=c.height;
-  return c; // fallback — рисуем на самом canvas
-}
 
-/* ---------- пакет «все 20» ---------- */
+/* инструменты */
+$('fontPick').onchange = ()=>layoutOverlay(lastLines);
+$('bgPick').onchange = ()=>layoutOverlay(lastLines);
+$('btnOverlay').onclick = ()=>{ overlayOn=!overlayOn; layoutOverlay(lastLines); };
+$('btnCopy').onclick = ()=>{
+  const t = lastLines.map(r=>r.text).join('\n');
+  navigator.clipboard&&navigator.clipboard.writeText(t);
+  status('📄 Скопировано '+lastLines.length+' строк');
+};
+
+/* ---------- пакет ---------- */
 $('btnAll').onclick = async ()=>{
   if(busy)return; busy=true; $('btnAll').disabled=true; $('btnOcr').disabled=true;
   let totalHit=0,totalSoft=0,totalSoftN=0; const rows=[];
@@ -234,8 +343,7 @@ $('btnAll').onclick = async ()=>{
     status('<span class="spin"></span>Пакет '+key+' …'); frac((i-1)/20);
     try{
       const im = await loadImg('testset/'+key+'.png','testset/'+key+'.jpg');
-      testKey = key; currentName = key;
-      drawBase(im); hasImg = true;
+      testKey=key; currentName=key; drawBase(im); hasImg=true;
       const resp = await ocrServer();
       const lines = resp.lines||[];
       const gtN = GT[key].map(norm);
