@@ -1,4 +1,4 @@
-name: ДИСТИЛЛ-МЁРТВЫЕ — точечное дообучение на реальных кропах s01/s05/s13-s19
+name: ДИСТИЛЛ-ВОЛНА2 — realds 47 точных боксов + distillmix 258 — точечное дообучение на реальных кропах s01/s05/s13-s19
 
 on:
   workflow_dispatch:
@@ -50,11 +50,11 @@ jobs:
       - name: Download base r30 + manga fonts
         run: |
           cd training
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r30_final.onnx" -o base_r30.onnx
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_sp_distill.onnx" -o base_distill.onnx
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
-          python3 -c "import os;assert os.path.getsize('base_r30.onnx')==3901826"
+          python3 -c "import os;assert os.path.getsize('base_distill.onnx')>3900000"
 
       - name: Install DejaVu
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra
@@ -63,22 +63,22 @@ jobs:
         run: |
           cd training && set -o pipefail
           python3 finetune_final.py \
-            --inp base_r30.onnx --out best_sp_distill.onnx \
+            --inp base_distill.onnx --out best_sp_distill2.onnx \
             --fonts fonts_extra/*.ttf /usr/share/fonts/truetype/dejavu/*.ttf \
             --steps 4000 --evalevery 2000 --timelimit 2100 \
-            --mined ../testset20/distillmix.npz --minedp 0.45 \
+            --mined ../testset20/distillmix2.npz --minedp 0.45 \
             --alphfrac 0.15 --alphp 0.12 --alphp2 0.06 \
             --fxfonts fonts_extra/RussoOne.ttf fonts_extra/StalinistOne.ttf \
-            --tag sp_distill 2>&1 | tee sp_distill.log
+            --tag sp_distill2 2>&1 | tee sp_distill2.log
 
       - name: Upload distill model to release v1.0.0
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.0
-          files: training/best_sp_distill.onnx
+          files: training/best_sp_distill2.onnx
 
       - name: Log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sp-distill-log
-          path: training/sp_distill.log
+          name: sp-distill2-log
+          path: training/sp_distill2.log
