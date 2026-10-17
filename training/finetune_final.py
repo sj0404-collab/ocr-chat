@@ -196,12 +196,36 @@ def to_canvas(img, rng):
 def pick_font(rng, fonts):
     return rng.choice(fonts)
 
-def make_batch(rng, bs, fonts):
+MINED_ITEMS = []  # [(array 32xW float32, text)] — реальные кропы со скринов с точными метками
+def load_mined(path):
+    d = np.load(path, allow_pickle=True)
+    texts = d['texts']
+    n = 0
+    for i in range(len(texts)):
+        a2 = d[f'img{i}'].astype(np.float32) / 255.0
+        s = sanitize(' '.join(unicodedata.normalize('NFKC', str(texts[i])).split()))
+        if a2.shape[0] != 32 or a2.shape[1] < 10 or len(s) < 2: continue
+        MINED_ITEMS.append((a2, s)); n += 1
+    print(f'mined: {n} real lines loaded', flush=True)
+
+def mined_to_canvas(a2, rng):
+    w = a2.shape[1]
+    paddedW = min(448, ((w + 7) // 8) * 8)
+    if rng.random() < 0.15: paddedW = min(448, paddedW + 8 * rng.randint(1, 6))
+    x = np.ones((1, 32, paddedW), np.float32)
+    x[0, :, :min(w, paddedW)] = a2[0, :, :min(w, paddedW)]
+    return x
+
+def make_batch(rng, bs, fonts, minedp=0.0):
     xs, ys, ylens, ws = [], [], [], []
     for _ in range(bs):
-        s = gen_line(rng)
-        img = render(s, rng, pick_font(rng, fonts))
-        xs.append(to_canvas(img, rng))
+        if MINED_ITEMS and rng.random() < minedp:
+            a2, s = MINED_ITEMS[rng.randrange(len(MINED_ITEMS))]
+            xs.append(mined_to_canvas(a2, rng))
+        else:
+            s = gen_line(rng)
+            img = render(s, rng, pick_font(rng, fonts))
+            xs.append(to_canvas(img, rng))
         lab = [v for v in ((C2I[c] if c in C2I else (LAT_OFF + LAT.index(c) if c in LAT else -1)) for c in s) if v >= 0]
         ys.append(lab); ylens.append(len(lab)); ws.append(xs[-1].shape[2])
     maxw = max(x.shape[2] for x in xs)
@@ -329,6 +353,8 @@ def main():
     ap.add_argument('--gtfile', default='')
     ap.add_argument('--steps', type=int, default=20000); ap.add_argument('--bs', type=int, default=16)
     ap.add_argument('--evalevery', type=int, default=3000)
+    ap.add_argument('--mined', default='', help='npz с реальными кропами (tools/mine_real.py)')
+    ap.add_argument('--minedp', type=float, default=0.22, help='доля mined-строк в батче')
     ap.add_argument('--timelimit', type=int, default=0, help='секунд; 0 = без лимита')
     ap.add_argument('--lr', type=float, default=6e-5)
     ap.add_argument('--tag', default='final'); ap.add_argument('--seed', type=int, default=42)
@@ -338,6 +364,7 @@ def main():
     assert fonts, 'no fonts found'
     if not a.gtfile: a.gtfile = os.path.join(root, 'testset20', 'gt20.json')
     if os.path.exists(a.gtfile): load_gt(a.gtfile)
+    if a.mined and os.path.exists(a.mined): load_mined(a.mined)
     torch.set_num_threads(2); torch.manual_seed(a.seed)
     print('FONTS:', len(fonts), [os.path.basename(f) for f in fonts][:24], flush=True)
     # DEV добавляем с удвоенным весом к списку (системные sans/serif полезны для UI-строчек)
@@ -357,7 +384,7 @@ def main():
     if os.path.exists(best_path): os.remove(best_path)
     stop = False
     for step in range(1, a.steps + 1):
-        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix_fonts)
+        xb, ys, ylens, ws, maxw = make_batch(rng, a.bs, mix_fonts, minedp=a.minedp)
         logit = net(torch.from_numpy(xb)).permute(1, 0, 2).log_softmax(-1)
         T = logit.shape[0]
         lens = torch.tensor([max(1, min(T, round(T * ws[i] / maxw))) for i in range(a.bs)])

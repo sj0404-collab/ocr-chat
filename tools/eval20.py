@@ -8,7 +8,7 @@
 Финальная строка лога: "SCORE=<binary> SOFT=<partial> HIT=<m>/<n>" — парсится обучением."""
 import sys, json, subprocess, re, unicodedata, os
 
-QUICK = ['s01', 's05', 's06', 's15', 's16', 's18']
+QUICK = ['s01', 's05', 's08', 's12', 's15', 's18']
 
 def norm(s):
     s = unicodedata.normalize('NFKC', s).lower().replace('ё', 'е')
