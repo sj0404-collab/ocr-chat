@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>YomiStand MONO — OCR ридер (всё внутри)</title>
+<title>YomiReader — OCR читалка (всё внутри)</title>
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,104 +12,136 @@
 :root{--bg:#121212;--surface:#1e1e1e;--primary:#4CAF50;--secondary:#2196F3;--text:#e0e0e0;--muted:#888;--border:#333;--warn:#ff9800;--bad:#f44336}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden;-webkit-user-select:none;user-select:none}
-.header{background:var(--surface);padding:7px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
-.header h1{font-size:13px;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
-select,.btn,label.button{padding:8px 11px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:bold;touch-action:manipulation;white-space:nowrap}
-select{background:var(--surface);border:1px solid #555;max-width:210px}
-.btn.secondary{background:var(--secondary)}
-.btn.outline{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.status{padding:4px 12px;font-size:12px;color:var(--muted);flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.main{flex:1;display:flex;overflow:hidden}
-.viewer{flex:1;position:relative;overflow:auto;background:#000;display:flex;align-items:flex-start;justify-content:center;padding:6px}
-.page{position:relative;display:inline-block}
-canvas{display:block;outline:1px solid var(--border)}
-.nav{position:fixed;top:46%;z-index:4;padding:14px 10px;font-size:22px;background:rgba(30,30,30,.7);border:none;color:#fff;border-radius:8px;cursor:pointer}
-.nav.left{left:8px}.nav.right{right:8px}
+.header{background:var(--surface);padding:6px 8px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
+.header .ttl{font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:40px;text-align:center}
+.btn,label.button{width:44px;height:40px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:9px;cursor:pointer;font-size:19px;touch-action:manipulation;flex-shrink:0}
+.btn.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.busy{background:var(--secondary);border-color:var(--secondary);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.wide{width:auto;padding:0 12px;font-size:13px;font-weight:bold}
+.status{padding:3px 12px;font-size:11.5px;color:var(--muted);flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;background:var(--bg)}
+.progress{width:100%;height:3px;background:var(--border);flex-shrink:0}
+.pfill{height:100%;background:var(--primary);width:0%;transition:width .2s}
+.viewer{flex:1;position:relative;overflow:auto;background:#000;overscroll-behavior:contain}
+.wrap-v{padding:6px 0 40px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.wrap-p{min-height:100%;display:flex;align-items:center;justify-content:center;padding:6px}
+.ppage{position:relative;flex-shrink:0}
+.ppage canvas{display:block;background:#000}
+.pov{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none}
 .ocrbox{position:absolute;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.12;
         font-family:'Caveat',cursive;font-weight:700;color:#111;cursor:pointer;overflow:hidden;
-        padding:2px;user-select:text;border-radius:3px;border:1.5px dashed transparent;white-space:pre-wrap;word-break:break-word}
+        padding:2px;border-radius:3px;border:1.5px dashed transparent;white-space:pre-wrap;word-break:break-word;pointer-events:auto;-webkit-user-select:text;user-select:text}
 .ocrbox:hover{border-color:var(--secondary)}
-.ocrbox.hl{border-color:var(--primary);box-shadow:0 0 8px rgba(76,175,80,.5)}
-.right{width:min(430px,56vw);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
-.panel-head{padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:6px}
-.panel-head .tools{display:flex;gap:5px;flex-wrap:wrap}
-.panel-head select{padding:4px 6px;font-size:11px}
-.panel-head .mini{padding:5px 8px;font-size:11px}
-.lines{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
-.card{background:var(--bg);border-left:3px solid var(--primary);border-radius:6px;padding:8px;font-size:14px;cursor:pointer}
+.ocrbox.hl{border-color:var(--primary);box-shadow:0 0 8px rgba(76,175,80,.55);z-index:3}
+.placeholder{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:13px;outline:1px dashed #2a2a2a}
+.rubber{position:absolute;border:2px solid var(--secondary);background:rgba(33,150,243,.18);z-index:5;display:none;pointer-events:none}
+.selmode .ppage{cursor:crosshair}
+.selmode{cursor:crosshair}
+body.selmode .viewer{touch-action:none}
+.navzone{position:absolute;top:0;bottom:0;width:28%;z-index:2}
+.navzone.l{left:0}.navzone.r{right:0}
+.pcounter{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;background:rgba(25,25,25,.82);border:1px solid var(--border);color:var(--text);padding:4px 12px;border-radius:14px;font-size:12px;z-index:6;pointer-events:none;opacity:0;transition:opacity .25s}
+.pcounter.show{opacity:1}
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(420px,92vw);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;z-index:10;transform:translateX(105%);transition:transform .22s;box-shadow:-6px 0 18px rgba(0,0,0,.5)}
+.panel.open{transform:translateX(0)}
+.ptabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.ptab{flex:1;padding:11px;text-align:center;font-size:13.5px;font-weight:bold;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.ptab.on{color:var(--primary);border-bottom-color:var(--primary)}
+.pbody{flex:1;overflow-y:auto;padding:10px}
+.hgrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0}
+.card{background:var(--bg);border-left:3px solid var(--primary);border-radius:6px;padding:8px;font-size:14px;cursor:pointer;margin-bottom:8px}
 .card:hover{background:#191919}
-.card .meta{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:3px;gap:6px}
+.card .meta{font-size:10.5px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:3px;gap:6px}
 .card.hit{border-left-color:var(--primary)}.card.close{border-left-color:var(--warn)}.card.miss{border-left-color:var(--bad)}
-.card .gt{font-size:12px;color:var(--warn);margin-top:3px}
-.summary{background:var(--bg);padding:10px 12px;border-top:1px solid var(--border);font-size:13px;line-height:1.6;max-height:42%;overflow-y:auto}
-.summary b{color:var(--primary)}
-table.results{width:100%;border-collapse:collapse;font-size:11.5px}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:26px 8px;line-height:1.7}
+.sect{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px}
+select,.sbtn{padding:9px 10px;background:var(--bg);border:1px solid #555;border-radius:8px;color:var(--text);font-size:13px}
+.sbtn{background:var(--primary);border:none;color:#fff;font-weight:bold;cursor:pointer}
+.sbtn.sec{background:var(--secondary)}
+.sbtn:disabled{opacity:.45}
+.row{display:flex;gap:8px;align-items:center;padding:5px 0}
+.row label{font-size:13px;flex:1}
+.row select{flex:2;min-width:0}
+.zrow{display:flex;gap:6px;align-items:center}
+.zrow .btn{height:34px;width:38px;font-size:16px}
+table.results{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
 table.results td,th{border:1px solid var(--border);padding:3px 5px;text-align:center}
 table.results th{color:var(--secondary)}
-.progress{width:100%;height:4px;background:var(--border);overflow:hidden;flex-shrink:0}
-.pfill{height:100%;background:var(--primary);width:0%;transition:width .2s}
-.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-radius:50%;border-top-color:var(--secondary);animation:sp 1s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes sp{to{transform:rotate(360deg)}}
+.switch{position:relative;width:44px;height:24px;flex-shrink:0}
+.switch input{display:none}
+.sl{position:absolute;inset:0;background:#444;border-radius:12px;transition:.2s}
+.sl:before{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#ccc;top:3px;left:3px;transition:.2s}
+.switch input:checked+.sl{background:var(--primary)}
+.switch input:checked+.sl:before{transform:translateX(20px);background:#fff}
 input[type=file]{display:none}
-.pageinfo{font-size:12px;color:var(--muted)}
-.font-caveat{font-family:'Caveat',cursive !important}
-.font-marck{font-family:'Marck Script',cursive !important}
-.font-bad{font-family:'Bad Script',cursive !important}
-.font-pangolin{font-family:'Pangolin',cursive !important}
-.font-neucha{font-family:'Neucha',cursive !important}
-@media(max-width:700px){.right{width:100vw;position:fixed;inset:6px;z-index:9;border:1px solid var(--border);border-radius:10px;display:none}.right.open{display:flex}.header h1{max-width:100%}}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.25);border-radius:50%;border-top-color:var(--secondary);animation:sp 1s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;top:54px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,.92);border:1px solid var(--border);padding:8px 16px;border-radius:10px;font-size:13px;z-index:11;opacity:0;transition:opacity .2s;pointer-events:none;max-width:86vw;text-align:center}
+.toast.show{opacity:1}
 </style>
 </head>
 <body>
 <div class="header">
-    <h1 id="titleHead">📖 YomiStand MONO</h1>
-    <label class="button" for="filePick">📁 .cbz/.zip/картинка</label><input type="file" id="filePick" accept=".cbz,.zip,image/*">
-    <select id="modePick">
-        <option value="vertical">⬇ Вебтун</option>
-        <option value="rtl">🔄 Справа</option>
-        <option value="ltr">➡ Слева</option>
-    </select>
-    <span class="pageinfo" id="pageInfo"></span>
-    <select id="modelPick"></select>
-    <select id="screenPick"></select>
-    <button class="btn secondary" id="btnOcr" disabled>🔍 OCR</button>
-    <button class="btn outline" id="btnAll" disabled>🏁</button>
-    <button class="btn outline" id="btnPanel">📋</button>
+    <label class="button" for="filePick" title="Открыть .cbz/.zip/картинку">📁</label><input type="file" id="filePick" accept=".cbz,.zip,image/*">
+    <button class="btn" id="btnSel" title="Сканировать выделением">✂</button>
+    <div class="ttl" id="titleHead">YomiReader</div>
+    <button class="btn" id="btnRead" title="Прочитать" disabled>🔍</button>
+    <button class="btn on" id="btnOverlay" title="Оверлей вкл/выкл">🅰</button>
+    <button class="btn" id="btnPanel" title="Панель">☰</button>
 </div>
 <div class="progress"><div class="pfill" id="pfill"></div></div>
 <div class="status" id="status"><span class="spin"></span>Готовлю встроенную модель…</div>
-<div class="main">
-    <div class="viewer" id="viewer">
-        <div class="page" id="page"><canvas id="cv"></canvas><div id="overlay"></div></div>
-    </div>
-    <button class="nav left" id="btnPrev">◀</button>
-    <button class="nav right" id="btnNext">▶</button>
-    <div class="right" id="panel">
-        <div class="panel-head">
-            <strong id="liner">Строки</strong>
-            <div class="tools">
-                <select id="fontPick">
-                    <option value="font-caveat">Caveat</option>
-                    <option value="font-marck">Marck</option>
-                    <option value="font-bad">Bad Script</option>
-                    <option value="font-pangolin">Pangolin</option>
-                    <option value="font-neucha">Neucha</option>
-                    <option value="">Системный</option>
-                </select>
-                <select id="bgPick">
-                    <option value="auto">Авто</option>
-                    <option value="none">Нет</option>
-                    <option value="white">Белая</option>
-                    <option value="dark">Тёмная</option>
-                </select>
-                <button class="btn outline mini" id="btnOverlay">🅰</button>
-                <button class="btn outline mini" id="btnCopy">📄</button>
-            </div>
-        </div>
-        <div class="lines" id="lines"></div>
-        <div class="summary" id="summary"></div>
-    </div>
+<div class="viewer" id="viewer">
+  <div class="wrap-v" id="stripV"></div>
+  <div class="wrap-p" id="stripP" style="display:none">
+    <div class="navzone l" id="zoneL"></div><div class="navzone r" id="zoneR"></div>
+  </div>
+</div>
+<div class="pcounter" id="pcounter"></div>
+<div class="toast" id="toast"></div>
+<div class="panel" id="panel">
+  <div class="ptabs">
+    <div class="ptab on" id="tabText" data-t="text">📖 Текст</div>
+    <div class="ptab" id="tabCfg" data-t="cfg">⚙ Настройки</div>
+  </div>
+  <div class="pbody" id="bodyText"></div>
+  <div class="pbody" id="bodyCfg" style="display:none">
+    <div class="sect">Чтение</div>
+    <div class="row"><label>Режим</label>
+      <select id="modePick">
+        <option value="vertical">⬇ Лента (вебтун)</option>
+        <option value="rtl">🔄 Справа налево</option>
+        <option value="ltr">➡ Слева направо</option>
+      </select></div>
+    <div class="row"><label>Авто-OCR при прокрутке</label>
+      <span class="switch"><input type="checkbox" id="autoOcr" checked><span class="sl"></span></span></div>
+    <div class="row"><label>Масштаб</label>
+      <div class="zrow" style="flex:2"><button class="btn" id="zOut">➖</button><span id="zVal" style="min-width:42px;text-align:center">100%</span><button class="btn" id="zIn">➕</button><button class="btn" id="zFit" title="По ширине">⇔</button></div></div>
+    <div class="sect">Оверлей перевода</div>
+    <div class="row"><label>Шрифт</label>
+      <select id="fontPick">
+        <option value="font-caveat">Caveat</option>
+        <option value="font-marck">Marck Script</option>
+        <option value="font-bad">Bad Script</option>
+        <option value="font-pangolin">Pangolin</option>
+        <option value="font-neucha">Neucha</option>
+        <option value="">Системный</option>
+      </select></div>
+    <div class="row"><label>Подложка</label>
+      <select id="bgPick">
+        <option value="auto">Авто (по полярности)</option>
+        <option value="none">Нет</option>
+        <option value="white">Белая</option>
+        <option value="dark">Тёмная</option>
+      </select></div>
+    <div class="row"><button class="sbtn" id="btnCopy" style="width:100%">📄 Скопировать весь текст главы</button></div>
+    <div class="sect">Модель распознавания</div>
+    <div class="row"><label>Модель</label><select id="modelPick"></select></div>
+    <div class="sect">Тестовый стенд (для разработки)</div>
+    <div class="row"><label>Скрин</label><select id="screenPick"><option value="">— тест-скрин s01…s20 —</option></select></div>
+    <div class="row"><button class="sbtn sec" id="btnAll" disabled style="width:100%">🏁 Прогнать все 20 (SCORE)</button></div>
+    <div id="testSummary" style="font-size:12px;line-height:1.6;padding-top:8px"></div>
+  </div>
 </div>
 <input type="file" id="modelFilePick" accept=".onnx" style="display:none">
 <script id="embeddedData" type="application/json">__EMBEDDED_JSON__</script>
@@ -121,11 +153,16 @@ const LAT = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const BLANK=109, UNK=110, LAT_OFF=111, NC=163, LINE_H=32, MAX_DIM=1400;
 const GT = EMBED.gt;
 const $=id=>document.getElementById(id);
-let session=null, sessionName="", busy=false;
-let pages=[], pageIdx=0, currentName="", testKey=null, hasImg=false;
-let lastLines=[], overlayOn=true;
+let session=null, sessionName="";
+let pages=[], pageIdx=0, activePage=-1, testKey=null;
+let overlayOn=true, selectMode=false, zoom=1, fitZoom=1, userZoomed=false;
+let q=[], qRun=false, ocrBusy=false;
+
 function status(t){$('status').innerHTML=t;}
 function frac(f){$('pfill').style.width=(f*100).toFixed(0)+'%';}
+let toastT=null;
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('show'),1900);}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function norm(s){s=s.normalize('NFKC').toLowerCase().replaceAll('ё','е');return s.replace(/[^0-9a-zа-я]+/gu,'');}
 function lev(a,b){if(a.length<b.length){const t=a;a=b;b=t;}let prev=[...Array(b.length+1).keys()];
  for(let i=1;i<=a.length;i++){const cur=[i];for(let j=1;j<=b.length;j++)cur.push(Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]!==b[j-1])));prev=cur;}return prev[b.length];}
@@ -133,104 +170,216 @@ function bestWindow(gtN,hypN){let best={sim:0,idx:-1};if(!hypN.length)return bes
  for(let gi=0;gi<gtN.length;gi++){const g=gtN[gi],n=hypN.length;if(n>g.length)continue;
  for(let i=0;i<=g.length-n;i++){const sim=1-lev(hypN,g.slice(i,i+n))/n;if(sim>best.sim)best={sim,idx:gi};}}
  return best;}
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 
-/* ---------- модели ---------- */
+/* =============== модели =============== */
 (function(){
   EMBED.models.forEach((m,i)=>{const o=document.createElement('option');o.value=m.name;
-    o.textContent=m.name+(i===0?' 👑':''); $('modelPick').appendChild(o);});
+    o.textContent=m.name+(i===0?' 👑':'');$('modelPick').appendChild(o);});
   const of=document.createElement('option');of.value='__file__';of.textContent='📂 .onnx с устройства…';
   $('modelPick').appendChild(of);
-  const oT=document.createElement('option');oT.value='';oT.textContent='тест-скрин…';$('screenPick').appendChild(oT);
   for(let i=1;i<=20;i++){const s='s'+String(i).padStart(2,'0');const o=document.createElement('option');o.value=s;o.textContent='тест '+s;$('screenPick').appendChild(o);}
 })();
 async function loadEmbeddedModel(name){
-  const m = EMBED.models.find(x=>x.name===name) || EMBED.models[0];
+  const m=EMBED.models.find(x=>x.name===name)||EMBED.models[0];
   status('<span class="spin"></span>Загружаю встроенную '+m.name+' …');
-  const raw = atob(m.b64);
-  const arr = new Uint8Array(raw.length);
+  const raw=atob(m.b64);const arr=new Uint8Array(raw.length);
   for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i);
-  session = await ort.InferenceSession.create(arr, {executionProviders:['wasm']});
-  sessionName = m.name;
-  $('btnOcr').disabled=false; $('btnAll').disabled=false;
-  status('✅ Модель '+m.name+' готова — открывайте .cbz или тест-скрин');
+  session=await ort.InferenceSession.create(arr,{executionProviders:['wasm']});
+  sessionName=m.name;$('btnRead').disabled=false;$('btnAll').disabled=false;
+  status('✅ Модель '+m.name+' готова — откройте главу (.cbz)');
+  triggerAuto();
 }
-$('modelPick').onchange = e=>{
+$('modelPick').onchange=e=>{
   if(e.target.value==='__file__'){$('modelFilePick').click();return;}
   loadEmbeddedModel(e.target.value);
 };
-$('modelFilePick').onchange = async e=>{
-  const f=e.target.files[0]; if(!f)return;
-  session = await ort.InferenceSession.create(new Uint8Array(await f.arrayBuffer()), {executionProviders:['wasm']});
-  sessionName=f.name; $('btnOcr').disabled=false; $('btnAll').disabled=false;
+$('modelFilePick').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  session=await ort.InferenceSession.create(new Uint8Array(await f.arrayBuffer()),{executionProviders:['wasm']});
+  sessionName=f.name;$('btnRead').disabled=false;$('btnAll').disabled=false;
   status('✅ '+f.name+' загружена');
 };
 
-/* ---------- файлы: cbz/zip/image ---------- */
-$('filePick').onchange = async e=>{
-  const f=e.target.files[0]; if(!f)return;
+/* =============== открытие главы =============== */
+$('filePick').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
   status('<span class="spin"></span>Открываю '+f.name+' …');
+  clearChapter();
   if(/\.(cbz|zip)$/i.test(f.name)){
     const zip=await JSZip.loadAsync(f);
     const names=Object.keys(zip.files).filter(n=>/\.(jpe?g|png|webp|gif|bmp)$/i.test(n)&&!/\/\./.test(n));
     names.sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-    pages=[];
-    for(const n of names){const blob=await zip.files[n].async('blob');pages.push({name:n,url:URL.createObjectURL(blob)});}
+    for(const n of names){
+      const blob=await zip.files[n].async('blob');
+      pages.push(mkPage(n,URL.createObjectURL(blob)));
+    }
     if(!pages.length){status('❌ В архиве нет картинок');return;}
     testKey=null;
-    $('titleHead').textContent='📖 '+f.name+' ('+pages.length+' стр.)';
-    showPage(0);
-    status('✅ '+pages.length+' страниц. ◀▶ — листать, «OCR» — прочитать');
-  } else {
-    const im=new Image();
-    im.onload=()=>{pages=[{name:f.name,url:im.src,img:im}];pageIdx=0;testKey=null;drawBase(im);hasImg=true;updInfo();
-      // авто-детект тестового скрина по имени s01..s20
-      const m2=f.name.match(/s([01]\d|20)/); if(m2&&GT['s'+m2[1]])testKey='s'+m2[1];};
-    im.src=URL.createObjectURL(f);
-    status('Картинка открыта — жмите «OCR»');
+    $('titleHead').textContent=f.name.replace(/\.(cbz|zip)$/i,'');
+    buildViewer();
+    userZoomed=false;
+    pages.slice(0,2).forEach(p=>renderPage(p).then(()=>{if(!userZoomed)zoomFit();}));
+    status('✅ Глава: '+pages.length+' стр. '+(session?'— читаю по мере прокрутки':'(модель ещё грузится)'));
+  }else{
+    const url=URL.createObjectURL(f);
+    const p=mkPage(f.name,url);
+    await loadImg(p);
+    pages.push(p);testKey=null;
+    const m2=f.name.match(/s([01]\d|20)/);if(m2&&GT['s'+m2[1]])testKey='s'+m2[1];
+    $('titleHead').textContent=f.name;
+    buildViewer();
+    status('Картинка открыта — жмите 🔍 или выделите рамкой ✂');
   }
 };
-function updInfo(){$('pageInfo').textContent=pages.length>1?('стр. '+(pageIdx+1)+'/'+pages.length):'';}
-function showPage(i){
-  if(!pages.length)return;
-  pageIdx=(i+pages.length)%pages.length;
-  const p=pages[pageIdx];
-  if(p.img){drawBase(p.img);hasImg=true;currentName=p.name;updInfo();$('viewer').scrollTop=0;return;}
-  const im=new Image();
-  im.onload=()=>{p.img=im;drawBase(im);hasImg=true;currentName=p.name;$('viewer').scrollTop=0;updInfo();};
-  im.src=p.url;
+function mkPage(name,url){
+  return {name,url,img:null,rendered:false,W:0,H:0,lu:null,lines:[],done:false,el:null,cv:null,ov:null,ph:null,session:sessionName,ocrTried:false};
 }
-function step(d){if(pages.length<2)return;const rtl=$('modePick').value==='rtl';showPage(pageIdx+(rtl?-d:d));}
-$('btnPrev').onclick=()=>step(-1);
-$('btnNext').onclick=()=>step(1);
-document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1);});
-$('btnPanel').onclick=()=>$('panel').classList.toggle('open');
+function loadImg(p){
+  if(p.img)return Promise.resolve(p.img);
+  return new Promise((res,rej)=>{const im=new Image();
+    im.onload=()=>{p.img=im;res(im);};im.onerror=rej;im.src=p.url;});
+}
+function clearChapter(){
+  $('stripV').innerHTML='';$('stripP').querySelectorAll('.ppage').forEach(e=>e.remove());
+  pages=[];pageIdx=0;activePage=-1;q=[];$('bodyText').innerHTML='';
+  $('titleHead').textContent='YomiReader';
+}
 
-/* ---------- встроенные тестовые скрины ---------- */
-$('screenPick').onchange=e=>{
-  const key=e.target.value; if(!key)return;
-  const im=new Image();
-  im.onload=()=>{pages=[{name:key,url:im.src,img:im}];pageIdx=0;testKey=key;currentName=key;drawBase(im);hasImg=true;updInfo();
-    status('Скрин '+key+' — жмите «OCR»');};
-  im.src=EMBED.testset[key];
-};
-
-/* ---------- отрисовка ---------- */
-function drawBase(im,boxes){
-  const c=$('cv');
+/* =============== верстка страниц =============== */
+function mode(){return $('modePick').value;}
+function buildViewer(){
+  const v=mode();
+  $('stripV').style.display=v==='vertical'?'flex':'none';
+  $('stripP').style.display=v==='vertical'?'none':'flex';
+  if(v==='vertical'){
+    const s=$('stripV');s.innerHTML='';
+    for(const p of pages)s.appendChild(ensureEl(p));
+  }else{
+    $('stripP').querySelectorAll('.ppage').forEach(e=>e.remove());
+    $('stripP').insertBefore(ensureEl(pages[pageIdx]),$('zoneL'));
+  }
+  initObserver();
+  updCounter();
+}
+function ensureEl(p){
+  if(p.el)return p.el;
+  const d=document.createElement('div');d.className='ppage';
+  const cv=document.createElement('canvas');
+  const ov=document.createElement('div');ov.className='pov';
+  const ph=document.createElement('div');ph.className='placeholder';ph.textContent='…';
+  const rb=document.createElement('div');rb.className='rubber';
+  d.appendChild(cv);d.appendChild(ov);d.appendChild(ph);d.appendChild(rb);
+  p.el=d;p.cv=cv;p.ov=ov;p.ph=ph;p.rb=rb;
+  d.style.width='320px';d.style.height='480px';
+  attachSel(d,p);
+  return d;
+}
+async function renderPage(p){
+  if(p.rendered)return;
+  await loadImg(p);
+  const im=p.img;
   const sc=Math.min(1,MAX_DIM/Math.max(im.width,im.height));
   const W=Math.max(1,Math.round(im.width*sc)),H=Math.max(1,Math.round(im.height*sc));
-  c.width=W;c.height=H;
-  const g=c.getContext('2d');g.drawImage(im,0,0,W,H);
-  const ov=$('overlay');ov.innerHTML='';
-  ov.style.position='absolute';ov.style.left='0';ov.style.top='0';
-  ov.style.width=W+'px';ov.style.height=H+'px';
-  if(boxes){g.lineWidth=2;
-    for(const b of boxes){g.strokeStyle=b.cls==='hit'?'#4CAF50':(b.cls==='close'?'#ff9800':'#2196F3');g.strokeRect(b.x,b.y,b.w,b.h);}}
-  return {g,W,H,sc};
+  p.W=W;p.H=H;
+  p.cv.width=W;p.cv.height=H;
+  const g=p.cv.getContext('2d');g.drawImage(im,0,0,W,H);
+  p.ov.style.width=W+'px';p.ov.style.height=H+'px';
+  p.ph.remove();p.ph=null;
+  p.rendered=true;
+  applyZoomTo(p);
 }
+function applyZoomTo(p){
+  if(!p.rendered)return;
+  p.cv.style.width=(p.W*zoom)+'px';p.cv.style.height=(p.H*zoom)+'px';
+  p.ov.style.transform='scale('+zoom+')';
+  p.el.style.width=(p.W*zoom)+'px';p.el.style.height=(p.H*zoom)+'px';
+}
+function applyZoomAll(){for(const p of pages)applyZoomTo(p);updCounter();}
+function setZoom(z){zoom=Math.max(.4,Math.min(3.5,z));$('zVal').textContent=Math.round(zoom*100)+'%';applyZoomAll();}
+function zoomFit(){
+  const p=pages[pageIdx]||pages.find(x=>x.rendered);
+  if(!p||!p.W)return;
+  const vw=$('viewer').clientWidth-16;
+  userZoomed=true;setZoom(vw/p.W);
+}
+$('zIn').onclick=()=>{userZoomed=true;setZoom(zoom*1.18);};
+$('zOut').onclick=()=>{userZoomed=true;setZoom(zoom/1.18);};
+$('zFit').onclick=zoomFit;
 
-/* ---------- JS-сегментация (браузерная) ---------- */
+/* =============== счётчик страниц =============== */
+let cntT=null;
+function updCounter(i){
+  if(!pages.length){$('pcounter').classList.remove('show');return;}
+  if(i==null)i=pageIdx;
+  const e=$('pcounter');e.textContent=(i+1)+' / '+pages.length;e.classList.add('show');
+  clearTimeout(cntT);cntT=setTimeout(()=>e.classList.remove('show'),2200);
+}
+$('viewer').addEventListener('scroll',()=>{
+  if(mode()!=='vertical'||!pages.length)return;
+  const mid=$('viewer').scrollTop+$('viewer').clientHeight/2;
+  let acc=0;
+  for(let i=0;i<pages.length;i++){const el=pages[i].el;if(!el)continue;
+    acc+=el.offsetHeight+6;
+    if(acc>=mid){if(i!==pageIdx){pageIdx=i;updCounter(i);}break;}}
+},{passive:true});
+
+/* =============== навигация (постраничные режимы) =============== */
+function step(d){
+  if(pages.length<2)return;
+  const rtl=mode()==='rtl';
+  showPage(pageIdx+(rtl?-d:d));
+}
+function showPage(i){
+  if(!pages.length)return;
+  pageIdx=((i%pages.length)+pages.length)%pages.length;
+  if(mode()!=='vertical')buildViewer();
+  else{const p=pages[pageIdx];if(p.el)p.el.scrollIntoView();}
+  updCounter();maybeAutoPage(pages[pageIdx]);
+}
+$('zoneL').onclick=()=>step(-1);
+$('zoneR').onclick=()=>step(1);
+document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1);});
+$('modePick').onchange=()=>{buildViewer();triggerAuto();};
+
+/* =============== выделение рамкой =============== */
+$('btnSel').onclick=()=>{
+  selectMode=!selectMode;
+  $('btnSel').classList.toggle('on',selectMode);
+  document.body.classList.toggle('selmode',selectMode);
+  toast(selectMode?'✂ Тяните рамку по странице — отсканирую её':'✂ Выделение выкл');
+};
+function attachSel(el,p){
+  let sx=0,sy=0,live=false;
+  el.addEventListener('pointerdown',e=>{
+    if(!selectMode)return;
+    e.preventDefault();el.setPointerCapture(e.pointerId);
+    const r=el.getBoundingClientRect();
+    sx=e.clientX-r.left;sy=e.clientY-r.top;live=true;
+    p.rb.style.display='block';
+    setRub(p,sx,sy,0,0);
+  });
+  el.addEventListener('pointermove',e=>{
+    if(!live)return;
+    const r=el.getBoundingClientRect();
+    const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    setRub(p,Math.min(sx,cx),Math.min(sy,cy),Math.abs(cx-sx),Math.abs(cy-sy));
+  });
+  el.addEventListener('pointerup',e=>{
+    if(!live)return;live=false;
+    const r=el.getBoundingClientRect();
+    const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    p.rb.style.display='none';
+    const r2={x:Math.min(sx,cx),y:Math.min(sy,cy),w:Math.abs(cx-sx),h:Math.abs(cy-sy)};
+    if(r2.w*zoom<10||r2.h*zoom<10)return;
+    const cvR=p.cv.getBoundingClientRect();
+    const k=p.cv.width/cvR.width;
+    const rect={x:(r2.x-(cvR.left-r.left))*k,y:(r2.y-(cvR.top-r.top))*k,w:r2.w*k,h:r2.h*k};
+    enqueue(async()=>{await ocrRegion(p,rect);});
+  });
+}
+function setRub(p,x,y,w,h){p.rb.style.left=x+'px';p.rb.style.top=y+'px';p.rb.style.width=w+'px';p.rb.style.height=h+'px';}
+
+/* =============== OCR: сегментация (JS) =============== */
 function getLuma(g,W,H){
   const d=g.getImageData(0,0,W,H).data,n=W*H,lu=new Float32Array(n);
   for(let i=0;i<n;i++){const j=i*4;lu[i]=0.299*d[j]+0.587*d[j+1]+0.114*d[j+2];}
@@ -256,12 +405,12 @@ function comps(m,W,H){
   for(let s=0;s<m.length;s++){
     if(!m[s]||lab[s]>=0)continue;
     let minx=W,maxx=0,miny=H,maxy=0,cnt=0;stack.push(s);lab[s]=id;
-    while(stack.length){const p=stack.pop(),py=(p/W)|0,px=p%W;
+    while(stack.length){const pp=stack.pop(),py=(pp/W)|0,px=pp%W;
       if(px<minx)minx=px;if(px>maxx)maxx=px;if(py<miny)miny=py;if(py>maxy)maxy=py;cnt++;
-      if(px>0&&m[p-1]&&lab[p-1]<0){lab[p-1]=id;stack.push(p-1);}
-      if(px<W-1&&m[p+1]&&lab[p+1]<0){lab[p+1]=id;stack.push(p+1);}
-      if(py>0&&m[p-W]&&lab[p-W]<0){lab[p-W]=id;stack.push(p-W);}
-      if(py<H-1&&m[p+W]&&lab[p+W]<0){lab[p+W]=id;stack.push(p+W);}}
+      if(px>0&&m[pp-1]&&lab[pp-1]<0){lab[pp-1]=id;stack.push(pp-1);}
+      if(px<W-1&&m[pp+1]&&lab[pp+1]<0){lab[pp+1]=id;stack.push(pp+1);}
+      if(py>0&&m[pp-W]&&lab[pp-W]<0){lab[pp-W]=id;stack.push(pp-W);}
+      if(py<H-1&&m[pp+W]&&lab[pp+W]<0){lab[pp+W]=id;stack.push(pp+W);}}
     boxes.push({x:minx,y:miny,w:maxx-minx+1,h:maxy-miny+1,a:cnt});id++;
     if(id>60000)break;}
   return boxes;
@@ -314,8 +463,9 @@ function segmentJS(lu,W,H){
   return keep;
 }
 
-/* ---------- OCR строки (CRNN+CTC в браузере) ---------- */
-async function ocrLine(g,W,H,b){
+/* =============== OCR строки (CRNN+CTC) =============== */
+async function ocrLine(p,b){
+  const g=p.cv.getContext('2d'),W=p.W,H=p.H;
   const pad=2;
   const x=Math.max(0,b.x-pad),y=Math.max(0,b.y-pad);
   const w=Math.min(W,b.x+b.w+pad)-x,h=Math.min(H,b.y+b.h+pad)-y;
@@ -324,7 +474,7 @@ async function ocrLine(g,W,H,b){
   const padW=Math.ceil((newW+4)/8)*8;
   const off=document.createElement('canvas');off.width=padW;off.height=LINE_H;
   const og=off.getContext('2d');og.fillStyle='#fff';og.fillRect(0,0,padW,LINE_H);
-  og.drawImage($('cv'),x,y,w,h,4,0,newW,LINE_H);
+  og.drawImage(p.cv,x,y,w,h,4,0,newW,LINE_H);
   const d=og.getImageData(0,0,padW,LINE_H).data;
   const xin=new Float32Array(padW*LINE_H).fill(1);
   for(let i=0;i<padW*LINE_H;i++){const j=i*4;xin[i]=(0.299*d[j]+0.587*d[j+1]+0.114*d[j+2])/255;}
@@ -351,17 +501,140 @@ async function ocrLine(g,W,H,b){
   return {text,conf};
 }
 
-/* ---------- Yomikai-оверлей ---------- */
-function layoutOverlay(lines){
-  const ov=$('overlay');ov.innerHTML='';
+/* =============== очередь OCR =============== */
+function enqueue(fn){q.push(fn);if(!qRun)nextQ();}
+async function nextQ(){
+  qRun=true;
+  while(q.length){
+    if(!session){q.length=0;break;}
+    const f=q.shift();
+    ocrBusy=true;$('btnRead').classList.add('busy');
+    try{await f();}catch(e){console.error(e);}
+  }
+  ocrBusy=false;$('btnRead').classList.remove('busy');
+  frac(1);qRun=false;
+  status('✅ Готово ('+sessionName+')');
+}
+
+/* =============== полное чтение страницы =============== */
+async function ocrPage(p,force){
+  if(!session)return;
+  await renderPage(p);
+  if(p.done&&!force&&p.session===sessionName){activePage=pages.indexOf(p);renderTextTab();return;}
+  if(!p.lu)p.lu=getLuma(p.cv.getContext('2d'),p.W,p.H);
+  status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': сегментация…');
+  await new Promise(r=>setTimeout(r,15));
+  const boxes=segmentJS(p.lu,p.W,p.H);
+  const gtLines=(GT&&testKey&&GT[testKey]&&pages.length===1)?GT[testKey]:null;
+  const gtN=gtLines?gtLines.map(norm):null;
+  const lines=[];
+  for(let i=0;i<boxes.length;i++){
+    status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': строка '+(i+1)+'/'+boxes.length);
+    frac((i+1)/boxes.length);
+    const r=await ocrLine(p,boxes[i]);
+    if(!r||!r.text)continue;
+    const L={x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:boxes[i].pol,text:r.text,conf:r.conf,idx:lines.length,sim:null,cls:''};
+    if(gtN){const bw=bestWindow(gtN,norm(r.text));L.sim=bw.sim;L.cls=L.sim>=0.999?'hit':(L.sim>=0.75?'close':'miss');}
+    lines.push(L);
+  }
+  p.lines=lines;p.done=true;p.session=sessionName;
+  layoutOverlay(p);
+  activePage=pages.indexOf(p);
+  renderTextTab();
+}
+
+/* =============== чтение выделенной области =============== */
+async function ocrRegion(p,rect){
+  if(!session){toast('Модель ещё не готова');return;}
+  await renderPage(p);
+  if(!p.lu)p.lu=getLuma(p.cv.getContext('2d'),p.W,p.H);
+  rect.x=Math.max(0,Math.round(rect.x));rect.y=Math.max(0,Math.round(rect.y));
+  rect.w=Math.min(p.W-rect.x,Math.round(rect.w));rect.h=Math.min(p.H-rect.y,Math.round(rect.h));
+  if(rect.w<10||rect.h<10)return;
+  const sub=new Float32Array(rect.w*rect.h);
+  for(let yy=0;yy<rect.h;yy++)
+    sub.set(p.lu.subarray((rect.y+yy)*p.W+rect.x,(rect.y+yy)*p.W+rect.x+rect.w),yy*rect.w);
+  status('<span class="spin"></span>Сканирую выделение…');
+  await new Promise(r=>setTimeout(r,15));
+  const boxes=segmentJS(sub,rect.w,rect.h);
+  for(const b of boxes){b.x+=rect.x;b.y+=rect.y;}
+  // выкинуть старые строки, чей центр внутри рамки
+  p.lines=p.lines.filter(L=>{
+    const cx=L.x+L.w/2,cy=L.y+L.h/2;
+    return !(cx>=rect.x&&cx<=rect.x+rect.w&&cy>=rect.y&&cy<=rect.y+rect.h);
+  });
+  let added=0;
+  for(let i=0;i<boxes.length;i++){
+    status('<span class="spin"></span>Выделение: строка '+(i+1)+'/'+boxes.length);
+    frac((i+1)/Math.max(1,boxes.length));
+    const r=await ocrLine(p,boxes[i]);
+    if(!r||!r.text)continue;
+    p.lines.push({x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:boxes[i].pol,text:r.text,conf:r.conf,idx:p.lines.length,sim:null,cls:''});
+    added++;
+  }
+  p.lines.sort((a,b)=>a.y-b.y||a.x-b.x);
+  p.lines.forEach((L,i)=>L.idx=i);
+  layoutOverlay(p);
+  activePage=pages.indexOf(p);
+  renderTextTab();
+  toast(added?('✂ +'+added+' строк в рамке'):'✂ В рамке текст не найден');
+}
+
+/* =============== авто-OCR при прокрутке =============== */
+const visible=new Set();
+const io=new IntersectionObserver(en=>{
+  for(const e of en.entries()){
+    const p=pages.find(x=>x.el===e.target);
+    if(!p)continue;
+    if(e.isIntersecting){visible.add(p);maybeAutoPage(p);}
+    else visible.delete(p);
+  }
+},{root:$('viewer'),rootMargin:'350px 0px',threshold:0});
+function initObserver(){
+  io.disconnect();
+  for(const p of pages)if(p.el)io.observe(p.el);
+}
+function maybeAutoPage(p){
+  if(!$('autoOcr').checked||!session)return;
+  if(p.done&&p.session===sessionName)return;
+  if(p._inQ)return;
+  p._inQ=true;
+  enqueue(async()=>{p._inQ=false;await ocrPage(p);});
+}
+function triggerAuto(){
+  if(mode()==='vertical'){
+    for(const p of visible)maybeAutoPage(p);
+  }else if(pages.length){
+    if(!pages[pageIdx].done)maybeAutoPage(pages[pageIdx]);
+  }
+}
+$('autoOcr').onchange=()=>{if($('autoOcr').checked)triggerAuto();};
+
+/* =============== кнопка «Прочитать» =============== */
+$('btnRead').onclick=()=>{
+  if(!session||!pages.length)return;
+  if(mode()==='vertical'){
+    toast('🔍 Читаю всю главу…');
+    for(const p of pages)if(!p.done||p.session!==sessionName)maybeAutoPage(p);
+  }else{
+    enqueue(async()=>{await ocrPage(pages[pageIdx],true);});
+  }
+};
+
+/* =============== оверлей =============== */
+const probe=document.createElement('span');
+probe.style.cssText='position:absolute;visibility:hidden;white-space:nowrap';
+document.body.appendChild(probe);
+function curFontFam(){
+  probe.className=$('fontPick').value||'';
+  return getComputedStyle(probe).fontFamily;
+}
+function layoutOverlay(p){
+  p.ov.innerHTML='';
   if(!overlayOn)return;
-  const fCls=$('fontPick').value,bgMode=$('bgPick').value;
+  const fCls=$('fontPick').value,bgMode=$('bgPick').value,fam=curFontFam();
   const meas=document.createElement('canvas').getContext('2d');
-  const probe=document.createElement('span');probe.className=fCls;
-  probe.style.position='absolute';probe.style.visibility='hidden';
-  document.body.appendChild(probe);
-  const fam=getComputedStyle(probe).fontFamily;probe.remove();
-  for(const r of lines){
+  for(const r of p.lines){
     const d=document.createElement('div');
     d.className='ocrbox '+fCls;
     d.dataset.i=r.idx;
@@ -380,8 +653,8 @@ function layoutOverlay(lines){
     }
     d.style.fontSize=best.toFixed(1)+'px';
     d.textContent=r.text;
-    d.onclick=()=>{hlLine(r.idx);$('panel').classList.add('open');};
-    ov.appendChild(d);
+    d.onclick=ev=>{ev.stopPropagation();hlLine(p,r.idx);openPanel('text');};
+    p.ov.appendChild(d);
   }
 }
 function fitText(meas,text,maxW,maxH,fs){
@@ -396,85 +669,119 @@ function fitText(meas,text,maxW,maxH,fs){
   }
   return lines*lh<=maxH;
 }
+$('btnOverlay').onclick=()=>{
+  overlayOn=!overlayOn;
+  $('btnOverlay').classList.toggle('on',overlayOn);
+  for(const p of pages)if(p.done)layoutOverlay(p);
+};
+$('fontPick').onchange=()=>{for(const p of pages)if(p.done)layoutOverlay(p);};
+$('bgPick').onchange=()=>{for(const p of pages)if(p.done)layoutOverlay(p);};
 
-/* ---------- запуск OCR ---------- */
-$('btnOcr').onclick=()=>{if(pages[pageIdx]&&pages[pageIdx].img)runOcr(pages[pageIdx].img,currentName);};
-async function runOcr(im,name){
-  if(busy||!session)return;busy=true;$('btnOcr').disabled=true;
-  const {g,W,H}=drawBase(im);
-  status('<span class="spin"></span>Сегментация…');await new Promise(r=>setTimeout(r,20));
-  const lu=getLuma(g,W,H);
-  const boxes=segmentJS(lu,W,H);
-  const gtLines=(GT&&testKey&&GT[testKey])?GT[testKey]:null;
-  const gtN=gtLines?gtLines.map(norm):null;
-  const results=[];let hits=0,soft=0,softN=0;
-  const t0=performance.now();
-  for(let i=0;i<boxes.length;i++){
-    frac((i+1)/boxes.length);
-    status('<span class="spin"></span>OCR строка '+(i+1)+'/'+boxes.length+' …');
-    const r=await ocrLine(g,W,H,boxes[i]);
-    if(!r||!r.text)continue;
-    r.idx=results.length;r.sim=null;r.cls='miss';
-    if(gtN){const bw=bestWindow(gtN,norm(r.text));r.sim=bw.sim;
-      r.cls=r.sim>=0.999?'hit':(r.sim>=0.75?'close':'miss');
-      if(r.sim>=0.999)hits++;
-      if(norm(r.text).length>=3){soft+=r.sim;softN++;}}
-    results.push(r);
+/* =============== панель =============== */
+function openPanel(tab){
+  $('panel').classList.add('open');
+  if(tab)switchTab(tab);
+}
+function switchTab(t){
+  const isText=t==='text';
+  $('tabText').classList.toggle('on',isText);
+  $('tabCfg').classList.toggle('on',!isText);
+  $('bodyText').style.display=isText?'block':'none';
+  $('bodyCfg').style.display=isText?'none':'block';
+}
+$('tabText').onclick=()=>switchTab('text');
+$('tabCfg').onclick=()=>switchTab('cfg');
+$('btnPanel').onclick=()=>$('panel').classList.toggle('open');
+
+function renderTextTab(){
+  const p=pages[activePage];
+  const el=$('bodyText');el.innerHTML='';
+  if(!p){
+    el.innerHTML='<div class="empty">Откройте главу (.cbz) 📁 —<br>текст будет появляться поверх страницы.<br><br>✂ — скан рамкой: выделите нужный кусок</div>';
+    return;
   }
-  lastLines=results;
-  layoutOverlay(results);
-  frac(1);
-  const took=((performance.now()-t0)/1000).toFixed(1);
-  const el=$('lines');el.innerHTML='';
-  $('liner').textContent=results.length+' строк';
-  for(const r of results){
-    const d=document.createElement('div');d.className='card '+(r.sim!=null?r.cls:'');
-    d.dataset.i=r.idx;
-    d.innerHTML='<div class="meta"><span>['+r.x+','+r.y+' '+r.w+'×'+r.h+'] pol'+r.pol+'</span><span>conf '+r.conf.toFixed(2)+(r.sim!=null?' · sim '+r.sim.toFixed(2):'')+'</span></div><div>'+esc(r.text)+'</div>'
-      +(r.sim!=null&&r.sim<0.999&&gtLines?'<div class="gt">GT ближ.: '+esc(nearestGT(r.text,gtLines))+'</div>':'');
-    d.onclick=()=>hlLine(r.idx);
+  const head=document.createElement('div');
+  head.className='hgrow';
+  head.innerHTML='<b>Стр. '+(activePage+1)+' — '+p.lines.length+' строк</b><span style="font-size:11px;color:var(--muted)">'+esc(p.name)+'</span>';
+  el.appendChild(head);
+  const gtLines=(GT&&testKey&&GT[testKey]&&pages.length===1)?GT[testKey]:null;
+  let hits=0,soft=0,softN=0;
+  if(!p.lines.length){
+    const em=document.createElement('div');em.className='empty';
+    em.textContent='На этой странице текст ещё не распознан — прокрутите до неё, жмите 🔍 или выделите рамкой ✂.';
+    el.appendChild(em);
+  }
+  for(const L of p.lines){
+    const d=document.createElement('div');
+    d.className='card '+(L.sim!=null?L.cls:'');
+    d.dataset.i=L.idx;
+    let meta='<span>conf '+L.conf.toFixed(2)+'</span><span>['+L.x+','+L.y+' '+L.w+'×'+L.h+']</span>';
+    if(L.sim!=null){meta='<span>sim '+L.sim.toFixed(2)+'</span>'+meta;
+      if(L.sim>=0.999)hits++;
+      if(norm(L.text).length>=3){soft+=L.sim;softN++;}}
+    d.innerHTML='<div class="meta">'+meta+'</div><div>'+esc(L.text)+'</div>';
+    d.onclick=()=>{hlLine(p,L.idx);};
     el.appendChild(d);
   }
-  const acc=gtLines?`<br>GT-попадания: <b>${hits}/${gtLines.length}</b>, SOFT≈${softN?(soft/softN*100).toFixed(0):0}%`:'';
-  $('summary').innerHTML=`<b>${sessionName}</b><br>${name}: ${results.length} строк за ${took}с${acc}`;
-  if(gtLines)$('panel').classList.add('open');
-  status('✅ '+name+': '+results.length+' строк'+(gtLines?`, GT ${hits}/${gtLines.length}`:'')+' за '+took+'с');
-  busy=false;$('btnOcr').disabled=false;
+  if(gtLines){
+    const s=document.createElement('div');
+    s.className='summary';
+    s.innerHTML='GT: <b>'+hits+'/'+gtLines.length+'</b> · SOFT≈'+(softN?(soft/softN*100).toFixed(0):0)+'%';
+    el.appendChild(s);
+  }
 }
-function hlLine(i){
+function hlLine(p,i){
   document.querySelectorAll('.ocrbox').forEach(e=>e.classList.remove('hl'));
-  const b=document.querySelector('.ocrbox[data-i="'+i+'"]');
-  if(b){b.classList.add('hl');b.parentElement.scrollTop=b.offsetTop-200;}
+  document.querySelectorAll('#bodyText .card').forEach(e=>e.classList.remove('hl'));
+  const b=p.ov.querySelector('.ocrbox[data-i="'+i+'"]');
+  if(b){
+    b.classList.add('hl');
+    if(mode()==='vertical')p.el.scrollIntoView({block:'center',behavior:'smooth'});
+  }
+  const c=document.querySelector('#bodyText .card[data-i="'+i+'"]');
+  if(c){c.classList.add('hl');c.scrollIntoView({block:'center'});}
 }
-function nearestGT(t,gtLines){
-  let best=null,bs=0;
-  for(const g of gtLines){const s=1-lev(norm(t),norm(g))/Math.max(1,norm(g).length);if(s>bs){bs=s;best=g;}}
-  return (best&&bs>0.3)?best+' ('+bs.toFixed(2)+')':'—';
-}
-$('fontPick').onchange=()=>layoutOverlay(lastLines);
-$('bgPick').onchange=()=>layoutOverlay(lastLines);
-$('btnOverlay').onclick=()=>{overlayOn=!overlayOn;layoutOverlay(lastLines);};
 $('btnCopy').onclick=()=>{
-  navigator.clipboard&&navigator.clipboard.writeText(lastLines.map(r=>r.text).join('\n'));
-  status('📄 Скопировано '+lastLines.length+' строк');
+  const all=[];
+  pages.forEach((p,i)=>{if(p.lines.length){all.push('— стр. '+(i+1)+' —');p.lines.forEach(L=>all.push(L.text));}});
+  if(all.length&&navigator.clipboard)navigator.clipboard.writeText(all.join('\n'));
+  toast('📄 Скопировано: '+all.length+' строк');
 };
 
-/* ---------- пакет «все 20» ---------- */
+/* =============== тестовый стенд =============== */
+$('screenPick').onchange=e=>{
+  const key=e.target.value;if(!key)return;
+  clearChapter();
+  const p=mkPage(key,EMBED.testset[key]);
+  pages.push(p);pageIdx=0;testKey=key;
+  $('titleHead').textContent='тест '+key;
+  buildViewer();
+  enqueue(async()=>{await ocrPage(p,true);
+    const gtN=GT[key].map(norm);let hits=0;
+    for(const L of p.lines){const bw=bestWindow(gtN,norm(L.text));if(bw.sim>=0.999)hits++;}
+    status('✅ '+key+': '+p.lines.length+' строк, GT '+hits+'/'+GT[key].length);
+  });
+};
 $('btnAll').onclick=async()=>{
-  if(busy||!session)return;busy=true;$('btnAll').disabled=true;$('btnOcr').disabled=true;
+  if(!session)return;
+  testKey=null;
   let totalHit=0,totalSoft=0,totalSoftN=0;const rows=[];
   for(let i=1;i<=20;i++){
     const key='s'+String(i).padStart(2,'0');
     status('<span class="spin"></span>Пакет '+key+' …');frac((i-1)/20);
     try{
-      const im=await new Promise(r_=>{const t=new Image();t.onload=()=>r_(t);t.src=EMBED.testset[key];});
-      const {g,W,H}=drawBase(im);
-      const lu=getLuma(g,W,H);
-      const boxes=segmentJS(lu,W,H);
+      const im=await new Promise(rs=>{const t=new Image();t.onload=()=>rs(t);t.src=EMBED.testset[key];});
+      const cv=document.createElement('canvas');
+      const sc=Math.min(1,MAX_DIM/Math.max(im.width,im.height));
+      cv.width=Math.round(im.width*sc);cv.height=Math.round(im.height*sc);
+      cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);
+      const lu=getLuma(cv.getContext('2d'),cv.width,cv.height);
+      const boxes=segmentJS(lu,cv.width,cv.height);
+      const p={cv,W:cv.width,H:cv.height};
       const gtN=GT[key].map(norm);
       let hits=0,soft=0,softN=0;
       for(let bi=0;bi<boxes.length;bi++){
-        const r=await ocrLine(g,W,H,boxes[bi]);
+        const r=await ocrLine(p,boxes[bi]);
         if(!r||!r.text)continue;
         const bw=bestWindow(gtN,norm(r.text));
         if(bw.sim>=0.999)hits++;
@@ -486,14 +793,34 @@ $('btnAll').onclick=async()=>{
   }
   frac(1);
   const sm=(totalSoft/Math.max(1,totalSoftN)*100).toFixed(1);
-  let h=`<b>${sessionName}</b><br>SCORE=<b>${(totalHit/75).toFixed(3)}</b> (${totalHit}/75) · SOFT=${sm}%<br><br><table class="results"><tr><th>скрин</th><th>hits</th><th>из</th><th>soft%</th></tr>`;
-  for(const r of rows)h+=`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`;
-  $('summary').innerHTML=h+'</table>';
-  $('panel').classList.add('open');
-  status(`✅ Все 20: SCORE=${totalHit}/75, SOFT≈${sm}%`);
-  busy=false;$('btnAll').disabled=false;$('btnOcr').disabled=false;
+  let h='<b>'+sessionName+'</b><br>SCORE=<b>'+(totalHit/75).toFixed(3)+'</b> ('+totalHit+'/75) · SOFT='+sm+'%';
+  h+='<table class="results"><tr><th>скрин</th><th>hits</th><th>из</th><th>soft%</th></tr>';
+  for(const r of rows)h+='<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+r[3]+'</td></tr>';
+  $('testSummary').innerHTML=h+'</table>';
+  openPanel('cfg');
+  status('✅ Все 20: SCORE='+totalHit+'/75, SOFT≈'+sm+'%');
 };
 
+/* =============== pinch =============== */
+const pts=new Map();
+let pinchD=0;
+const viewer=$('viewer');
+viewer.addEventListener('pointerdown',e=>{pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pts.size===2){const a=[...pts.values()];pinchD=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);}});
+viewer.addEventListener('pointermove',e=>{
+  if(!pts.has(e.pointerId))return;
+  pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pts.size===2&&pinchD>0){
+    const a=[...pts.values()];
+    const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+    if(Math.abs(d-pinchD)>6){userZoomed=true;setZoom(zoom*d/pinchD);pinchD=d;}
+  }
+});
+const dropPt=e=>{pts.delete(e.pointerId);if(pts.size<2)pinchD=0;};
+viewer.addEventListener('pointerup',dropPt);
+viewer.addEventListener('pointercancel',dropPt);
+
+renderTextTab();
 loadEmbeddedModel(EMBED.models[0].name);
 </script>
 </body>
