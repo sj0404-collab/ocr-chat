@@ -416,7 +416,8 @@ function comps(m,W,H){
   return boxes;
 }
 function linesFromBoxes(boxes,W,H){
-  const hs=boxes.filter(b=>b.h>=7&&b.h<=H*0.08&&b.w>=3&&b.w<=W*0.6&&b.a>=10);
+  const maxH=H<500?H*0.6:H*0.08;   // адаптивный потолок: иначе в маленькой рамке текст вылетает
+  const hs=boxes.filter(b=>b.h>=7&&b.h<=maxH&&b.w>=3&&b.w<=W*0.6&&b.a>=10);
   hs.sort((a,b)=>(a.y+a.h/2)-(b.y+b.h/2));
   const rows=[];
   for(const b of hs){
@@ -430,14 +431,14 @@ function linesFromBoxes(boxes,W,H){
     if(r.bs.length<2&&!(r.bs[0].w>12&&r.bs[0].h>10))continue;
     r.bs.sort((a,b)=>a.x-b.x);
     const mw=r.bs.reduce((s,b)=>s+b.w,0)/r.bs.length;
-    let cx=r.bs[0].x,cx2=r.bs[0].x+r.bs[0].w,cy0=r.bs[0].y,cy1=r.bs[0].y+r.bs[0].h;
+    let cx=r.bs[0].x,cx2=r.bs[0].x+r.bs[0].w,cy0=r.bs[0].y,cy1=r.bs[0].y+r.bs[0].h,px=r.bs[0].a;
     for(let i=1;i<r.bs.length;i++){
       const b=r.bs[i],gap=b.x-cx2;
-      if(gap>mw*3.2){lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0});cx=b.x;cy0=b.y;cy1=b.y+b.h;}
-      else{cy0=Math.min(cy0,b.y);cy1=Math.max(cy1,b.y+b.h);}
+      if(gap>mw*3.2){lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0,px});cx=b.x;cy0=b.y;cy1=b.y+b.h;px=b.a;}
+      else{cy0=Math.min(cy0,b.y);cy1=Math.max(cy1,b.y+b.h);px+=b.a;}
       cx2=Math.max(cx2,b.x+b.w);}
-    lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0});}
-  return lines.filter(l=>l.w>=14&&l.h>=8);
+    lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0,px});}
+  return lines.filter(l=>l.w>=14&&l.h>=8&&l.px<=0.78*l.w*l.h); // отсев сплошных клякв арта
 }
 function segmentJS(lu,W,H){
   const thsD=[110,140,170,200,230],thsL=[25,45,70,100,140];
@@ -452,13 +453,18 @@ function segmentJS(lu,W,H){
   const keep=[];
   for(const b of all){
     let dup=false;
+    const bA=b.w*b.h,bcx=b.x+b.w/2,bcy=b.y+b.h/2;
     for(const k of keep){
-      const ox=Math.max(b.x,k.x),oy=Math.max(b.y,k.y);
-      const iw=Math.min(b.x+b.w,k.x+k.w)-ox,ih=Math.min(b.y+b.h,k.y+k.h)-oy;
+      const kA=k.w*k.h;
+      const iw=Math.min(b.x+b.w,k.x+k.w)-Math.max(b.x,k.x);
+      const ih=Math.min(b.y+b.h,k.y+k.h)-Math.max(b.y,k.y);
       const inter=Math.max(0,iw)*Math.max(0,ih);
-      if(inter>0.55*b.w*b.h||inter>0.55*k.w*k.h){dup=true;break;}}
+      if(inter>=0.45*Math.min(bA,kA)){dup=true;break;}
+      const kcx=k.x+k.w/2,kcy=k.y+k.h/2;
+      if(Math.abs(bcx-kcx)<0.5*Math.min(b.w,k.w)&&Math.abs(bcy-kcy)<0.6*Math.min(b.h,k.h)){dup=true;break;}
+    }
     if(!dup)keep.push(b);
-    if(keep.length>400)break;}
+    if(keep.length>220)break;}
   keep.sort((a,b)=>a.y-b.y||a.x-b.x);
   return keep;
 }
@@ -476,9 +482,15 @@ async function ocrLine(p,b){
   const og=off.getContext('2d');og.fillStyle='#fff';og.fillRect(0,0,padW,LINE_H);
   og.drawImage(p.cv,x,y,w,h,4,0,newW,LINE_H);
   const d=og.getImageData(0,0,padW,LINE_H).data;
+  // полярность по самому кропу (фон = большинство пикселей), а не по странице
+  let mean=0,mN=0;
+  for(let yy=0;yy<LINE_H;yy++)for(let xx=4;xx<4+newW;xx++){
+    const j=(yy*padW+xx)*4;mean+=0.299*d[j]+0.587*d[j+1]+0.114*d[j+2];mN++;}
+  mean/=Math.max(1,mN);
+  const polEff=mean<118?1:0;
   const xin=new Float32Array(padW*LINE_H).fill(1);
   for(let i=0;i<padW*LINE_H;i++){const j=i*4;xin[i]=(0.299*d[j]+0.587*d[j+1]+0.114*d[j+2])/255;}
-  if(b.pol)for(let i=0;i<xin.length;i++)xin[i]=1-xin[i];
+  if(polEff)for(let i=0;i<xin.length;i++)xin[i]=1-xin[i];
   const t=new ort.Tensor('float32',xin,[1,1,LINE_H,padW]);
   const out=await session.run({x:t});
   const raw=out[Object.keys(out)[0]].data;
@@ -498,7 +510,15 @@ async function ocrLine(p,b){
   const conf=ps.length?ps[ps.length>>1]:0;
   let text=chars.join('').replace(/\s+/g,' ').trim();
   while(text.includes('……'))text=text.replaceAll('……','…');
-  return {text,conf};
+  return {text,conf,pol:polEff};
+}
+/* отсев мусора: короткий шум-без-кириллицы и низкий conf */
+function keepLine(text,conf){
+  const n=norm(text);
+  if(n.length===0)return conf>=0.55;
+  if(n.length<=2)return conf>=0.6;
+  if(!/[а-я]/.test(n)&&n.length<=4)return conf>=0.7;
+  return conf>=0.22;
 }
 
 /* =============== очередь OCR =============== */
@@ -532,8 +552,8 @@ async function ocrPage(p,force){
     status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': строка '+(i+1)+'/'+boxes.length);
     frac((i+1)/boxes.length);
     const r=await ocrLine(p,boxes[i]);
-    if(!r||!r.text)continue;
-    const L={x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:boxes[i].pol,text:r.text,conf:r.conf,idx:lines.length,sim:null,cls:''};
+    if(!r||!r.text||!keepLine(r.text,r.conf))continue;
+    const L={x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:r.pol,text:r.text,conf:r.conf,idx:lines.length,sim:null,cls:''};
     if(gtN){const bw=bestWindow(gtN,norm(r.text));L.sim=bw.sim;L.cls=L.sim>=0.999?'hit':(L.sim>=0.75?'close':'miss');}
     lines.push(L);
   }
@@ -568,8 +588,8 @@ async function ocrRegion(p,rect){
     status('<span class="spin"></span>Выделение: строка '+(i+1)+'/'+boxes.length);
     frac((i+1)/Math.max(1,boxes.length));
     const r=await ocrLine(p,boxes[i]);
-    if(!r||!r.text)continue;
-    p.lines.push({x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:boxes[i].pol,text:r.text,conf:r.conf,idx:p.lines.length,sim:null,cls:''});
+    if(!r||!r.text||!keepLine(r.text,r.conf))continue;
+    p.lines.push({x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:r.pol,text:r.text,conf:r.conf,idx:p.lines.length,sim:null,cls:''});
     added++;
   }
   p.lines.sort((a,b)=>a.y-b.y||a.x-b.x);
@@ -822,6 +842,10 @@ viewer.addEventListener('pointercancel',dropPt);
 
 renderTextTab();
 loadEmbeddedModel(EMBED.models[0].name);
+</script>
+</body>
+</html>
+D.models[0].name);
 </script>
 </body>
 </html>
