@@ -188,9 +188,12 @@ class OcrEngine(modelBytes: ByteArray) {
     /** Обёртка: светлая страница = v1.1-сегментация; тёмная = баллоны + остаточный проход.
      *  Каждый бокс имеет 5-й элемент: полярность (1 = светлый текст, инвертировать яркость). */
     private fun segmentAny(px: IntArray, w: Int, h: Int, dark: Boolean): MutableList<IntArray> {
-        // v1.5: баллоны на ЛЮБОЙ странице (белые баллоны с чёрным текстом — и на светлых)
+        // v1.7: баллоны на ЛЮБОЙ странице (несколько порогов + open-варианты + замкнутый контур)
         val out = ArrayList<IntArray>()
-        val bubbles = findBubbles(px, w, h, true) + findBubbles(px, w, h, false)
+        val bubbles = findBubbles(px, w, h, true) + findBubbles(px, w, h, true, 85) +
+                findBubbles(px, w, h, true, 130) + findBubbles(px, w, h, false) +
+                findBubbles(px, w, h, false, 190) + findBubbles(px, w, h, false, 210, 2) +
+                findBubbles(px, w, h, false, 190, 3) + findEnclosed(px, w, h)
         for (b in bubbles) {
             // внутренняя рамка баллона (отступ от контура), все клампы!
             val ix = min(b[0] + 8, w - 1); val iy = min(b[1] + 8, h - 1)
@@ -251,21 +254,56 @@ class OcrEngine(modelBytes: ByteArray) {
     }
 
     /** Однотонные баллоны: СЫРЫЕ компоненты (замыкание тут вредно — склеивает с бордюрами
-     *  скриншота), fill≥45%, размеры 2–50% страницы, не касаются края страницы. */
-    private fun findBubbles(px: IntArray, w: Int, h: Int, darkBlob: Boolean): List<IntArray> {
-        val raw = ByteArray(w * h)
+     *  скриншота), fill≥45%, размеры 2–50% страницы, не касаются края страницы.
+     *  thr — порог яркости (0 = дефолт 45/210): «чёрные» баллоны манхвы бывают тёмно-серыми 60-120.
+     *  openK>0: эрозия→дилатация — отрезает тонкие светлые штрихи фона («дождь»), которые
+     *  сливают светлый баллон с краем страницы. */
+    private fun findBubbles(px: IntArray, w: Int, h: Int, darkBlob: Boolean, thr: Int = 0, openK: Int = 0): List<IntArray> {
+        val t = if (thr != 0) thr else (if (darkBlob) 45 else 210)
+        var raw = ByteArray(w * h)
         for (i in px.indices) {
             val l = lumaOf(px[i])
-            raw[i] = if (darkBlob) (if (l < 45) 1 else 0) else (if (l > 210) 1 else 0)
+            raw[i] = if (darkBlob) (if (l < t) 1 else 0) else (if (l > t) 1 else 0)
         }
+        if (openK > 0) raw = dilate(erode(raw, w, h, openK, openK), w, h, openK, openK)
+        val fillReq = if (openK > 0) 50 else (if (t == 45 || t == 210) 45 else 55)
         val out = ArrayList<IntArray>()
         for (b in componentsCnt(raw, w, h)) {
             val bw = b[2]; val bh = b[3]; val cnt = b[4]
             val area = bw * bh
             if (bw < 48 || bh < 28 || area < w * h / 120 || area * 2 > w * h) continue
-            if (cnt < area * 45 / 100) continue
+            if (cnt < area * fillReq / 100) continue
             if (b[0] == 0 || b[1] == 0 || b[0] + bw == w || b[1] + bh == h) continue
             out.add(intArrayOf(b[0], b[1], bw, bh, if (darkBlob) 1 else 0))
+        }
+        return out
+    }
+
+    /** Баллоны через замкнутый контур: 'стены' = l<235 (+дилатация), свободные области = ~стены,
+     *  интерьер = свободная область, НЕ касающаяся края. Ловит баллоны на белом фоне манхвы и
+     *  чёрные на светлом — то, что findBubbles пропускает из-за слияния с фоном. */
+    private fun findEnclosed(px: IntArray, w: Int, h: Int): List<IntArray> {
+        var wall = ByteArray(w * h)
+        for (i in px.indices) wall[i] = if (lumaOf(px[i]) < 235) 1 else 0
+        wall = dilate(wall, w, h, 2, 2)
+        val free = ByteArray(w * h)
+        for (i in wall.indices) free[i] = if (wall[i].toInt() == 0) 1 else 0
+        val out = ArrayList<IntArray>()
+        for (b in componentsCnt(free, w, h)) {
+            val bw = b[2]; val bh = b[3]; val cnt = b[4]
+            if (b[0] == 0 || b[1] == 0 || b[0] + bw == w || b[1] + bh == h) continue
+            val area = bw * bh
+            if (bw < 48 || bh < 28 || area < w * h / 120 || area * 2 > w * h) continue
+            if (cnt < area * 50 / 100) continue
+            if (bw <= bh / 8 || bh > bw * 12) continue
+            // средняя яркость центра: решаем, чёрный это баллон (светлый текст) или светлый
+            var s = 0L; var n = 0
+            val mx = b[0] + bw / 4; val my = b[1] + bh / 4
+            for (yy in my until b[1] + bh - bh / 4) for (xx in mx until b[0] + bw - bw / 4) {
+                s += lumaOf(px[yy * w + xx]); n++
+            }
+            val mb = if (n > 0) s / n else 255
+            out.add(intArrayOf(b[0], b[1], bw, bh, if (mb < 110) 1 else 0))
         }
         return out
     }
@@ -306,11 +344,16 @@ class OcrEngine(modelBytes: ByteArray) {
 
     /** Строки внутри баллона: BFS зануляет компоненты, касающиеся края (светлое кольцо
      *  контура) и мусор <3px (JPEG-шум), затем строки = горизонтальные полосы по rowsum. */
+    /** Порог — адаптивный, от медианы интерьера: ловит серый маркерный текст (манхва) и
+     *  светящийся/цветной текст на тёмном баллоне, где фиксированные 127 терялось. */
     private fun bubbleLines(sub: IntArray, sw: Int, sh: Int, polDark: Boolean): List<IntArray> {
+        val ls = IntArray(sub.size) { lumaOf(sub[it]) }.sortedArray()
+        val base = ls[ls.size / 2]
+        val thr = if (polDark) minOf(165, base + 28) else maxOf(110, base - 28)
         val m = ByteArray(sw * sh)
         for (i in sub.indices) {
             val l = lumaOf(sub[i])
-            m[i] = if (polDark) (if (l > 127) 1 else 0) else (if (l < 127) 1 else 0)
+            m[i] = if (polDark) (if (l > thr) 1 else 0) else (if (l < thr) 1 else 0)
         }
         val lab = ByteArray(sw * sh)
         val q = IntArray(sw * sh)

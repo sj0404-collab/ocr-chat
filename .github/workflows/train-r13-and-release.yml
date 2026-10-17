@@ -1,4 +1,4 @@
-name: APK v1.10.0 (ML Kit Latin + CRNN r22) + доуч r27
+name: ФИНАЛ r28 — одна модель на 20 скринов + APK v1.11.0
 
 on:
   workflow_dispatch: {}
@@ -7,10 +7,13 @@ permissions:
   contents: write
 
 jobs:
-  train_r13:
+  train_final:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.hash.outputs.sha }}
+      score: ${{ steps.parse.outputs.score }}
+      soft: ${{ steps.parse.outputs.soft }}
+      hit: ${{ steps.parse.outputs.hit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install ML deps (CPU torch)
-        run: pip install --no-cache-dir "torch==2.4.*" --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir onnx onnxruntime pillow
+        run: pip install --no-cache-dir "torch==2.4.*" --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir onnx onnxruntime pillow numpy
 
       - name: Fetch fonts from google/fonts (OFL, cyrillic)
         run: |
@@ -44,50 +47,58 @@ jobs:
           curl -sfL --retry 3 "$G/amaticsc/AmaticSC-Bold.ttf" -o AmaticSC-Bold.ttf
           curl -sfL --retry 3 "$G/yanonekaffeesatz/YanoneKaffeesatz%5Bwght%5D.ttf" -o YanoneKaffeesatz.ttf
           curl -sfL --retry 3 "$G/robotocondensed/RobotoCondensed%5Bwght%5D.ttf" -o RobotoCondensed.ttf
-          ls -la
+          ls -la | head -5
 
       - name: Install DejaVu fonts (augmentation baseline)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra
 
-      - name: Download r13 from release
+      - name: Download base r27 + freeware manga fonts
         run: |
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r26_lat.onnx" -o training/base_r26.onnx
-          ls -la training/base_r26.onnx
-
-      - name: Train r19 (1200 steps, 25% реальные строки со скринов юзера)
-        run: |
-          cd training && set -o pipefail && mkdir -p fonts_extra
+          cd training && mkdir -p fonts_extra
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r27_arc.onnx" -o base_r27.onnx
           # фриварные манга-леттеринг шрифты с Диска юзера (не коммитим в публичный репо)
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
-          python3 -c "import sys;[sys.exit(2) if __import__('os').path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
-          python3 finetune_chain.py \
-            --inp base_r26.onnx --out best_r27_arc.onnx \
-            --font fonts_extra/AnimeAceCyr.ttf --p 0.16 \
-            --prev fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf fonts/YanoneKaffeesatz.ttf fonts/Oswald.ttf fonts/Play-Bold.ttf fonts/RobotoCondensed.ttf fonts/AmaticSC-Bold.ttf fonts/Underdog.ttf fonts/KellySlab.ttf fonts/RuslanDisplay.ttf \
-            --steps 600 --tag r27_arc 2>&1 | tee r27_train.log
+          python3 -c "import sys,os;[sys.exit(2) if os.path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
+          ls -la base_r27.onnx
 
-      - name: Hash
+      - name: Train r28 final (20k шагов, eval каждые 3k, стоп при SCORE=1.000)
+        run: |
+          cd training && set -o pipefail && \
+          python3 finetune_final.py \
+            --inp base_r27.onnx --out best_r28_final.onnx \
+            --fonts fonts/*.ttf fonts_extra/AnimeAceCyr.ttf fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf \
+            --steps 20000 --evalevery 3000 --timelimit 10800 --tag r28_final 2>&1 | tee r28_train.log
+
+      - name: Hash + parse score
         id: hash
-        run: echo "sha=$(md5sum training/best_r21_manga_v1.onnx 2>/dev/null || md5sum training/best_r27_arc.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: |
+          md5sum training/best_r28_final.onnx && echo "sha=$(md5sum training/best_r28_final.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Upload r14 to release v1.0.0
+      - name: Parse SCORE
+        id: parse
+        run: |
+          L=$(grep '^SCORE=' training/r28_train.log | tail -1); echo "last: $L"
+          S=$(echo "$L" | sed -n 's/.*SCORE=\([0-9.]*\).*/\1/p'); M=$(echo "$L" | sed -n 's/.*SOFT=\([0-9.]*\).*/\1/p'); H=$(echo "$L" | sed -n 's/.*HIT=\([0-9\/]*\).*/\1/p')
+          echo "score=$S" >> "$GITHUB_OUTPUT"; echo "soft=$M" >> "$GITHUB_OUTPUT"; echo "hit=$H" >> "$GITHUB_OUTPUT"
+
+      - name: Upload r28 final to release v1.0.0
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.0
-          files: training/best_r27_arc.onnx
+          files: training/best_r28_final.onnx
 
       - name: Upload training log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: r27-train-log
-          path: training/r27_train.log
+          name: r28-train-log
+          path: training/r28_train.log
 
   build_apk:
-    needs: train_r13
+    needs: train_final
     runs-on: ubuntu-latest
     outputs:
       apk_md5: ${{ steps.apkhash.outputs.md5 }}
@@ -109,11 +120,12 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Download r13 (from train job release upload) & put into APK assets + bump version
+      - name: Download r28 final & put into APK assets + bump version
         run: |
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r22_manga.onnx" -o app/src/main/assets/best.onnx
-          sed -i 's/versionCode 1/versionCode 16/; s/versionName "1.0"/versionName "1.10.0"/' app/build.gradle
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r28_final.onnx" -o app/src/main/assets/best.onnx
+          sed -i 's/versionCode 1/versionCode 17/; s/versionName "1.0"/versionName "1.11.0"/' app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
+          ls -la app/src/main/assets/best.onnx
 
       - name: Build release APK
         run: |
@@ -122,41 +134,45 @@ jobs:
 
       - name: Sign APK (debug key from ci/)
         run: |
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.10.0.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.10.0.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.10.0.apk | head -2
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.11.0.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.11.0.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.11.0.apk | head -2
 
       - name: APK hash
         id: apkhash
-        run: echo "md5=$(md5sum OCR-chat-v1.10.0.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "md5=$(md5sum OCR-chat-v1.11.0.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Tag v1.10.0 on this commit
+      - name: Tag v1.11.0 on this commit
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git tag -a v1.10.0 -m "v1.10.0 — гибрид: ML Kit латиница + CRNN r22 кириллица"
-          git push origin v1.10.0
+          git tag -a v1.11.0 -m "v1.11.0 — финальная модель r28 (20 скринов/GT-фрагменты/все шрифты)"
+          git push origin v1.11.0
 
-      - name: Release v1.10.0 (APK + all models from v1.0.0)
+      - name: Release v1.11.0 (APK + all models from v1.0.0)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.10.0
-          name: OCR чат v1.10.0
+          tag_name: v1.11.0
+          name: OCR чат v1.11.0
           body: |
-            **OCR-chat-v1.10.0.apk** — цикл 13: **гибрид** — латинские строки распознаёт ML Kit (bundled, офлайн), кириллические — CRNN **r22_manga** (0.731/1.0 на 51 GT-строке); слияние по перекрытию боксов (уверенные cyr-строки не трогаем). Подмена модели по кнопке 📦 доступна (r26_lat — билингва-вариант).
-            Модели r0–r26 отдельными файлами см. в релизе v1.0.0.
+            **OCR-chat-v1.11.0.apk** — **финальная модель r28_final**: единая двуязычная сеть, обученная на
+            смеси всех 19 шрифтов (OFL + 3 манга-леттеринга) + GT-фрагменты 20 эталонных скринов
+            (обводки, рваные штрихи, screentone, низкое разрешение, грады, курсив, JPEG).
+            Метрика по 75 GT-репликам: **SCORE=${{ needs.train_final.outputs.score }}** (SOFT=${{ needs.train_final.outputs.soft }}, HIT=${{ needs.train_final.outputs.hit }}).
+            Гибрид с ML Kit (латиница/UI) сохранён поверх. Исторические модели r0–r27 — в релизе v1.0.0.
           files: |
-            OCR-chat-v1.10.0.apk
+            OCR-chat-v1.11.0.apk
 
       - name: Upload APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: OCR-chat-v1.10.0.apk
-          path: OCR-chat-v1.10.0.apk
+          name: OCR-chat-v1.11.0.apk
+          path: OCR-chat-v1.11.0.apk
 
       - name: Print summary
         run: |
-          echo "r14 md5: ${{ needs.train_r13.outputs.sha }}"
+          echo "r28 md5: ${{ needs.train_final.outputs.sha }}"
+          echo "SCORE=${{ needs.train_final.outputs.score }} SOFT=${{ needs.train_final.outputs.soft }} HIT=${{ needs.train_final.outputs.hit }}"
           echo "APK md5: ${{ steps.apkhash.outputs.md5 }}"
