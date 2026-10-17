@@ -1,0 +1,116 @@
+name: СПЕЦ-ГРИД — 4 маленьких специалиста по шрифтовым классам (параллельно)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  train_spec:
+    name: spec ${{ matrix.key }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: hand
+            ffonts: "fonts_extra/Neucha.ttf fonts_extra/BadScript.ttf fonts_extra/Caveat.ttf fonts_extra/MarckScript.ttf fonts_extra/Underdog.ttf fonts_extra/Marmelad.ttf"
+            efonts: "fonts_extra/AnimeAceCyr.ttf fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf"
+            minedp: 0.30
+            alphfrac: 0.25
+            alphp: 0.25
+            steps: 6000
+            tl: 2700
+          - key: sfx
+            ffonts: "fonts_extra/RussoOne.ttf fonts_extra/StalinistOne.ttf fonts_extra/Oswald.ttf"
+            efonts: "fonts_extra/AnimeAceCyr.ttf"
+            minedp: 0.25
+            alphfrac: 0.50
+            alphp: 0.50
+            steps: 6000
+            tl: 2700
+          - key: serif
+            ffonts: "fonts_extra/PlayfairDisplay.ttf fonts_extra/Cormorant.ttf fonts_extra/RuslanDisplay.ttf fonts_extra/Forum.ttf fonts_extra/GreatVibes.ttf"
+            efonts: ""
+            minedp: 0.30
+            alphfrac: 0.25
+            alphp: 0.15
+            steps: 6000
+            tl: 2700
+          - key: ui
+            ffonts: "fonts_extra/RobotoCondensed.ttf fonts_extra/Oswald.ttf fonts_extra/Play-Bold.ttf"
+            efonts: ""
+            minedp: 0.35
+            alphfrac: 0.20
+            alphp: 0.10
+            steps: 6000
+            tl: 2700
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python deps
+        run: pip install -q torch --index-url https://download.pytorch.org/whl/cpu && pip install -q onnx onnxruntime opencv-python-headless numpy pillow
+
+      - name: Fetch fonts (google/fonts OFL needed by this specialist)
+        run: |
+          mkdir -p training/fonts_extra
+          cd training/fonts_extra
+          G="https://raw.githubusercontent.com/google/fonts/main/ofl"
+          curl -sfL --retry 3 "$G/neucha/Neucha.ttf" -o Neucha.ttf
+          curl -sfL --retry 3 "$G/badscript/BadScript-Regular.ttf" -o BadScript.ttf
+          curl -sfL --retry 3 "$G/caveat/Caveat%5Bwght%5D.ttf" -o Caveat.ttf
+          curl -sfL --retry 3 "$G/marckscript/MarckScript-Regular.ttf" -o MarckScript.ttf
+          curl -sfL --retry 3 "$G/underdog/Underdog-Regular.ttf" -o Underdog.ttf
+          curl -sfL --retry 3 "$G/marmelad/Marmelad-Regular.ttf" -o Marmelad.ttf
+          curl -sfL --retry 3 "$G/russoone/RussoOne-Regular.ttf" -o RussoOne.ttf
+          curl -sfL --retry 3 "$G/stalinistone/StalinistOne-Regular.ttf" -o StalinistOne.ttf
+          curl -sfL --retry 3 "$G/oswald/Oswald%5Bwght%5D.ttf" -o Oswald.ttf
+          curl -sfL --retry 3 "$G/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf" -o PlayfairDisplay.ttf
+          curl -sfL --retry 3 "$G/cormorant/Cormorant%5Bwght%5D.ttf" -o Cormorant.ttf
+          curl -sfL --retry 3 "$G/ruslandisplay/RuslanDisplay-Regular.ttf" -o RuslanDisplay.ttf
+          curl -sfL --retry 3 "$G/forum/Forum-Regular.ttf" -o Forum.ttf
+          curl -sfL --retry 3 "$G/greatvibes/GreatVibes-Regular.ttf" -o GreatVibes.ttf
+          curl -sfL --retry 3 "$G/robotocondensed/RobotoCondensed%5Bwght%5D.ttf" -o RobotoCondensed.ttf
+          curl -sfL --retry 3 "$G/play/Play-Bold.ttf" -o Play-Bold.ttf
+
+      - name: Download base r30 + manga fonts
+        run: |
+          cd training
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r30_final.onnx" -o base_r30.onnx
+          [ -s fonts_extra/AnimeAceCyr.ttf ] || curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
+          [ -s fonts_extra/MangaCyr.otf ] || curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
+          [ -s fonts_extra/ComicsCyr.ttf ] || curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
+          python3 -c "import os;assert os.path.getsize('base_r30.onnx')==3901826"
+          ls -la fonts_extra | head -3
+
+      - name: Install DejaVu (ui baseline)
+        if: matrix.key == 'ui'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra
+
+      - name: Train spec-${{ matrix.key }} (${{ matrix.steps }} шагов от r30)
+        run: |
+          cd training && set -o pipefail
+          EXTRA_FONTS=""
+          if [ "${{ matrix.key }}" = "ui" ]; then EXTRA_FONTS="/usr/share/fonts/truetype/dejavu/*.ttf"; fi
+          python3 finetune_final.py \
+            --inp base_r30.onnx --out best_sp_${{ matrix.key }}.onnx \
+            --fonts ${{ matrix.ffonts }} ${{ matrix.efonts }} $EXTRA_FONTS \
+            --steps ${{ matrix.steps }} --evalevery 2000 --timelimit ${{ matrix.tl }} \
+            --mined ../testset20/mined2.npz --minedp ${{ matrix.minedp }} \
+            --alphfrac ${{ matrix.alphfrac }} --alphp ${{ matrix.alphp }} --alphp2 0.10 \
+            --fxfonts fonts_extra/RussoOne.ttf fonts_extra/StalinistOne.ttf \
+            --tag sp_${{ matrix.key }} 2>&1 | tee sp_${{ matrix.key }}.log
+
+      - name: Upload specialist to release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          files: training/best_sp_${{ matrix.key }}.onnx
+
+      - name: Log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-${{ matrix.key }}-log
+          path: training/sp_${{ matrix.key }}.log
