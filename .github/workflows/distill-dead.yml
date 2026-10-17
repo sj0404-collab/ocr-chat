@@ -1,0 +1,84 @@
+name: ДИСТИЛЛ-МЁРТВЫЕ — точечное дообучение на реальных кропах s01/s05/s13-s19
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  train_distill:
+    name: distill-dead
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python deps
+        run: pip install -q torch --index-url https://download.pytorch.org/whl/cpu && pip install -q onnx onnxruntime opencv-python-headless numpy pillow
+
+      - name: Fetch fonts google/OFL (вся библиотека — синтетика-регуляризатор)
+        run: |
+          mkdir -p training/fonts_extra
+          cd training/fonts_extra
+          G="https://raw.githubusercontent.com/google/fonts/main/ofl"
+          for f in "marckscript/MarckScript-Regular.ttf MarckScript.ttf" \
+                   "badscript/BadScript-Regular.ttf BadScript.ttf" \
+                   "pacifico/Pacifico-Regular.ttf Pacifico.ttf" \
+                   "caveat/Caveat%5Bwght%5D.ttf Caveat.ttf" \
+                   "neucha/Neucha.ttf Neucha.ttf" \
+                   "underdog/Underdog-Regular.ttf Underdog.ttf" \
+                   "kellyslab/KellySlab-Regular.ttf KellySlab.ttf" \
+                   "ruslandisplay/RuslanDisplay-Regular.ttf RuslanDisplay.ttf" \
+                   "playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf PlayfairDisplay.ttf" \
+                   "cormorant/Cormorant%5Bwght%5D.ttf Cormorant.ttf" \
+                   "lobster/Lobster-Regular.ttf Lobster.ttf" \
+                   "oswald/Oswald%5Bwght%5D.ttf Oswald.ttf" \
+                   "play/Play-Bold.ttf Play-Bold.ttf" \
+                   "amaticsc/AmaticSC-Bold.ttf AmaticSC-Bold.ttf" \
+                   "yanonekaffeesatz/YanoneKaffeesatz%5Bwght%5D.ttf YanoneKaffeesatz.ttf" \
+                   "robotocondensed/RobotoCondensed%5Bwght%5D.ttf RobotoCondensed.ttf" \
+                   "russoone/RussoOne-Regular.ttf RussoOne.ttf" \
+                   "stalinistone/StalinistOne-Regular.ttf StalinistOne.ttf" \
+                   "forum/Forum-Regular.ttf Forum.ttf" \
+                   "greatvibes/GreatVibes-Regular.ttf GreatVibes.ttf" \
+                   "marmelad/Marmelad-Regular.ttf Marmelad.ttf"; do
+            set -- $f; curl -sfL --retry 3 "$G/$1" -o "$2"
+          done
+          ls *.ttf | wc -l
+
+      - name: Download base r30 + manga fonts
+        run: |
+          cd training
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r30_final.onnx" -o base_r30.onnx
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1qyLtv3UuCablu04Oa9NRktPnVz7zpH6q" -o fonts_extra/AnimeAceCyr.ttf
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
+          curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
+          python3 -c "import os;assert os.path.getsize('base_r30.onnx')==3901826"
+
+      - name: Install DejaVu
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra
+
+      - name: Train distill (4k шагов от r30, 45% distillmix-реальные)
+        run: |
+          cd training && set -o pipefail
+          python3 finetune_final.py \
+            --inp base_r30.onnx --out best_sp_distill.onnx \
+            --fonts fonts_extra/*.ttf /usr/share/fonts/truetype/dejavu/*.ttf \
+            --steps 4000 --evalevery 2000 --timelimit 2100 \
+            --mined ../testset20/distillmix.npz --minedp 0.45 \
+            --alphfrac 0.15 --alphp 0.12 --alphp2 0.06 \
+            --fxfonts fonts_extra/RussoOne.ttf fonts_extra/StalinistOne.ttf \
+            --tag sp_distill 2>&1 | tee sp_distill.log
+
+      - name: Upload distill model to release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          files: training/best_sp_distill.onnx
+
+      - name: Log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp-distill-log
+          path: training/sp_distill.log
