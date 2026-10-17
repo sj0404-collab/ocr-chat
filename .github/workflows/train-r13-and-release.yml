@@ -1,4 +1,4 @@
-name: ФИНАЛ r30 — АЛФАВИТ-куrrикула → шрифты + mined + 30k шагов + APK v1.11.1
+name: ФИНАЛ r31 — алфавит + SFX-доноры + mined2(168) + 18k шагов + APK v1.11.2
 
 on:
   workflow_dispatch: {}
@@ -61,41 +61,50 @@ jobs:
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1Vyyfjx8Gt-J5dphH9lUWeCdWDZeIit9R" -o fonts_extra/MangaCyr.otf
           curl -sfL --retry 3 "https://drive.google.com/uc?export=download&id=1IBN8WoggGStaKOQKmw5tLXNB-rAlH65L" -o fonts_extra/ComicsCyr.ttf
           python3 -c "import sys,os;[sys.exit(2) if os.path.getsize('fonts_extra/'+f)<20000 else None for f in ['AnimeAceCyr.ttf','MangaCyr.otf','ComicsCyr.ttf']]"
-          ls -la base_r28.onnx
+          # донорские рубленые/декор OFL-шрифты для SFX (кириллица проверена локально)
+          G="https://raw.githubusercontent.com/google/fonts/main/ofl"
+          curl -sfL --retry 3 "$G/russoone/RussoOne-Regular.ttf" -o fonts_extra/RussoOne.ttf
+          curl -sfL --retry 3 "$G/stalinistone/StalinistOne-Regular.ttf" -o fonts_extra/StalinistOne.ttf
+          curl -sfL --retry 3 "$G/forum/Forum-Regular.ttf" -o fonts_extra/Forum.ttf
+          curl -sfL --retry 3 "$G/greatvibes/GreatVibes-Regular.ttf" -o fonts_extra/GreatVibes.ttf
+          curl -sfL --retry 3 "$G/marmelad/Marmelad-Regular.ttf" -o fonts_extra/Marmelad.ttf
+          python3 -c "import os;[sys.exit(2) if False else None];import sys;[sys.exit(2) if os.path.getsize('fonts_extra/'+f)<20000 else None for f in ['RussoOne.ttf','StalinistOne.ttf','Forum.ttf','GreatVibes.ttf','Marmelad.ttf']]"
+          ls -la base_r30.onnx
 
-      - name: Train r30 final (30k шагов, 22% mined, eval каждые 3.5k)
+      - name: Train r31 final (18k шагов, 25% mined2, SFX-доноры, eval каждые 3k)
         run: |
           cd training && set -o pipefail && \
           python3 finetune_final.py \
-            --inp base_r28.onnx --out best_r30_final.onnx \
+            --inp base_r30.onnx --out best_r31_final.onnx \
             --fonts fonts/*.ttf fonts_extra/AnimeAceCyr.ttf fonts_extra/MangaCyr.otf fonts_extra/ComicsCyr.ttf \
-            --steps 30000 --evalevery 3500 --timelimit 11400 --mined ../testset20/mined.npz --minedp 0.22 --tag r30_final 2>&1 | tee r30_train.log
+            --steps 18000 --evalevery 3000 --timelimit 10000 --mined ../testset20/mined2.npz --minedp 0.25 --alphfrac 0.30 \
+            --fxfonts fonts_extra/RussoOne.ttf fonts_extra/StalinistOne.ttf fonts_extra/Forum.ttf fonts_extra/GreatVibes.ttf fonts_extra/Marmelad.ttf --tag r31_final 2>&1 | tee r31_train.log
 
       - name: Hash + parse score
         id: hash
         run: |
-          md5sum training/best_r30_final.onnx && echo "sha=$(md5sum training/best_r30_final.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          md5sum training/best_r31_final.onnx && echo "sha=$(md5sum training/best_r31_final.onnx | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Parse SCORE
         id: parse
         run: |
-          L=$(grep '^SCORE=' training/r30_train.log | tail -1); echo "last: $L"
+          L=$(grep '^SCORE=' training/r31_train.log | tail -1); echo "last: $L"
           S=$(echo "$L" | sed -n 's/.*SCORE=\([0-9.]*\).*/\1/p'); M=$(echo "$L" | sed -n 's/.*SOFT=\([0-9.]*\).*/\1/p'); H=$(echo "$L" | sed -n 's/.*HIT=\([0-9\/]*\).*/\1/p')
           echo "score=$S" >> "$GITHUB_OUTPUT"; echo "soft=$M" >> "$GITHUB_OUTPUT"; echo "hit=$H" >> "$GITHUB_OUTPUT"
 
-      - name: Upload r30 final to release v1.0.0
+      - name: Upload r31 final to release v1.0.0
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.0
-          files: training/best_r30_final.onnx
+          files: training/best_r31_final.onnx
 
       - name: Upload training log artifact
         uses: actions/upload-artifact@v4
         with:
-          name: r30-train-log
-          path: training/r30_train.log
+          name: r31-train-log
+          path: training/r31_train.log
 
   build_apk:
     needs: train_final
@@ -122,8 +131,8 @@ jobs:
 
       - name: Download r28 final & put into APK assets + bump version
         run: |
-          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r30_final.onnx" -o app/src/main/assets/best.onnx
-          sed -i 's/versionCode 1/versionCode 18/; s/versionName "1.0"/versionName "1.11.1"/' app/build.gradle
+          curl -sfL "https://github.com/${{ github.repository }}/releases/download/v1.0.0/best_r31_final.onnx" -o app/src/main/assets/best.onnx
+          sed -i 's/versionCode 1/versionCode 19/; s/versionName "1.0"/versionName "1.11.2"/' app/build.gradle
           grep -E "versionCode|versionName" app/build.gradle
           ls -la app/src/main/assets/best.onnx
 
@@ -134,42 +143,42 @@ jobs:
 
       - name: Sign APK (debug key from ci/)
         run: |
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.11.1.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.11.1.apk
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.11.1.apk | head -2
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -v 4 app/build/outputs/apk/release/app-release-unsigned.apk OCR-chat-v1.11.2.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign --ks ci/debug.keystore --ks-pass pass:android --v1-signing-enabled --v2-signing-enabled OCR-chat-v1.11.2.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs OCR-chat-v1.11.2.apk | head -2
 
       - name: APK hash
         id: apkhash
-        run: echo "md5=$(md5sum OCR-chat-v1.11.1.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "md5=$(md5sum OCR-chat-v1.11.2.apk | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Tag v1.11.1 on this commit
+      - name: Tag v1.11.2 on this commit
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git tag -a v1.11.1 -m "v1.11.1 — финальная модель r30 (mined-строки со скринов + 30k шагов)"
-          git push origin v1.11.1
+          git tag -a v1.11.2 -m "v1.11.2 — финальная модель r31 (алфавит-куrrикула + SFX-доноры + mined2 168 строк + 18k шагов)"
+          git push origin v1.11.2
 
-      - name: Release v1.11.1 (APK + all models from v1.0.0)
+      - name: Release v1.11.2 (APK + all models from v1.0.0)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v1.11.1
-          name: OCR чат v1.11.1
+          tag_name: v1.11.2
+          name: OCR чат v1.11.2
           body: |
-            **OCR-chat-v1.11.1.apk** — **финальная модель r30_final**: единая двуязычная сеть, обученная на
+            **OCR-chat-v1.11.2.apk** — **финальная модель r31_final**: единая двуязычная сеть, обученная на
             смеси всех 19 шрифтов (OFL + 3 манга-леттеринга) + GT-фрагменты 20 эталонных скринов
             (обводки, рваные штрихи, screentone, низкое разрешение, грады, курсив, JPEG).
             Метрика по 75 GT-репликам: **SCORE=${{ needs.train_final.outputs.score }}** (SOFT=${{ needs.train_final.outputs.soft }}, HIT=${{ needs.train_final.outputs.hit }}).
             Гибрид с ML Kit (латиница/UI) сохранён поверх. Исторические модели r0–r27 — в релизе v1.0.0.
           files: |
-            OCR-chat-v1.11.1.apk
+            OCR-chat-v1.11.2.apk
 
       - name: Upload APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: OCR-chat-v1.11.1.apk
-          path: OCR-chat-v1.11.1.apk
+          name: OCR-chat-v1.11.2.apk
+          path: OCR-chat-v1.11.2.apk
 
       - name: Print summary
         run: |

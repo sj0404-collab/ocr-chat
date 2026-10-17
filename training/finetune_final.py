@@ -208,11 +208,11 @@ SFX_POOL = ['АХ', 'ОХ', 'ЭЙ', 'ОЙ', 'УХ', 'АГА', 'УРА', 'ХА', 
 
 def gen_alphabet(rng):
     r = rng.random()
-    if r < 0.50:  # одиночный символ
+    if r < 0.45:  # одиночный символ
         ch = rng.choice(ALPH_CHARS)
         if rng.random() < 0.12: ch += rng.choice(['.', ',', '!', '?', '-', '…', ':'])
         return ch
-    if r < 0.85:  # коротыши 2–4 знака (сырая стыковка букв, иногда через пробел)
+    if r < 0.80:  # коротыши 2–4 знака (сырая стыковка букв, иногда через пробел)
         n = rng.randint(2, 4)
         lets = [rng.choice(ALPH_CHARS) for _ in range(n)]
         s = ''.join(lets)
@@ -222,6 +222,7 @@ def gen_alphabet(rng):
         return s
     return rng.choice(SFX_POOL)  # готовый звуковик/пары
 
+FX_FONTS = []   # донорские рубленые/декор-шрифты для SFX (r31)
 MINED_ITEMS = []  # [(array 32xW float32, text)] — реальные кропы со скринов с точными метками
 def load_mined(path):
     d = np.load(path, allow_pickle=True)
@@ -251,7 +252,8 @@ def make_batch(rng, bs, fonts, minedp=0.0, alphp=0.0):
             xs.append(mined_to_canvas(a2, rng))
         else:
             s = gen_alphabet(rng) if (alphp > 0 and rng.random() < alphp) else gen_line(rng)
-            img = render(s, rng, pick_font(rng, fonts))
+            pool = FX_FONTS if (FX_FONTS and s in SFX_POOL and rng.random() < 0.75) else fonts
+            img = render(s, rng, pick_font(rng, pool))
             xs.append(to_canvas(img, rng))
         lab = [v for v in ((C2I[c] if c in C2I else (LAT_OFF + LAT.index(c) if c in LAT else -1)) for c in s) if v >= 0]
         ys.append(lab); ylens.append(len(lab)); ws.append(xs[-1].shape[2])
@@ -385,6 +387,7 @@ def main():
     ap.add_argument('--alphfrac', type=float, default=0.33, help='доля шагов: фаза А «алфавит»')
     ap.add_argument('--alphp', type=float, default=0.40, help='доля одиночек/коротышей в фазе А')
     ap.add_argument('--alphp2', type=float, default=0.08, help='доля одиночек/коротышей после фазы А')
+    ap.add_argument('--fxfonts', nargs='*', default=[], help='донорские шрифты для SFX-строк')
     ap.add_argument('--timelimit', type=int, default=0, help='секунд; 0 = без лимита')
     ap.add_argument('--lr', type=float, default=6e-5)
     ap.add_argument('--tag', default='final'); ap.add_argument('--seed', type=int, default=42)
@@ -395,6 +398,9 @@ def main():
     if not a.gtfile: a.gtfile = os.path.join(root, 'testset20', 'gt20.json')
     if os.path.exists(a.gtfile): load_gt(a.gtfile)
     if a.mined and os.path.exists(a.mined): load_mined(a.mined)
+    for pat in a.fxfonts:
+        FX_FONTS.extend(f2 for f2 in glob.glob(pat) if os.path.exists(f2))
+    if FX_FONTS: print('FXFONTS:', [os.path.basename(f) for f in FX_FONTS], flush=True)
     torch.set_num_threads(2); torch.manual_seed(a.seed)
     print('FONTS:', len(fonts), [os.path.basename(f) for f in fonts][:24], flush=True)
     # DEV добавляем с удвоенным весом к списку (системные sans/serif полезны для UI-строчек)
