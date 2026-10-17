@@ -213,7 +213,8 @@ def mined_to_canvas(a2, rng):
     paddedW = min(448, ((w + 7) // 8) * 8)
     if rng.random() < 0.15: paddedW = min(448, paddedW + 8 * rng.randint(1, 6))
     x = np.ones((1, 32, paddedW), np.float32)
-    x[0, :, :min(w, paddedW)] = a2[0, :, :min(w, paddedW)]
+    n = min(w, paddedW)
+    x[0, :, :n] = a2[:, :n]
     return x
 
 def make_batch(rng, bs, fonts, minedp=0.0):
