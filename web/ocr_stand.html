@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>OCR Стенд — наши CRNN-модели (CRNN+CTC)</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+<style>
+:root{--bg:#121212;--surface:#1e1e1e;--primary:#4CAF50;--secondary:#2196F3;--text:#e0e0e0;--muted:#888;--border:#333;--warn:#ff9800;--bad:#f44336}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.header{background:var(--surface);padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0}
+.header h1{font-size:14px;color:var(--primary);margin-right:8px}
+select,.btn,label.button{padding:9px 12px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;touch-action:manipulation}
+select{background:var(--surface);border:1px solid #555;max-width:280px}
+.btn.secondary{background:var(--secondary)}
+.btn.outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.status{padding:6px 12px;font-size:12px;color:var(--muted);flex-shrink:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.main{flex:1;display:flex;overflow:hidden}
+.left{flex:1;position:relative;overflow:auto;background:#000;display:flex;align-items:flex-start;justify-content:center;padding:8px}
+canvas{max-width:100%;height:auto;outline:1px solid var(--border)}
+.right{width:min(460px,55vw);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.panel-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.lines{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--bg);border-left:3px solid var(--primary);border-radius:6px;padding:8px;font-size:14px}
+.card .meta{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:3px;gap:6px}
+.card.hit{border-left-color:var(--primary)}
+.card.close{border-left-color:var(--warn)}
+.card.miss{border-left-color:var(--bad)}
+.card .gt{font-size:12px;color:var(--warn);margin-top:3px}
+.summary{background:var(--bg);padding:10px 12px;border-top:1px solid var(--border);font-size:13px;line-height:1.6;max-height:45%;overflow-y:auto}
+.summary b{color:var(--primary)}
+table.results{width:100%;border-collapse:collapse;font-size:11.5px}
+table.results td,th{border:1px solid var(--border);padding:3px 5px;text-align:center}
+table.results th{color:var(--secondary)}
+.progress{width:100%;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0}
+.pfill{height:100%;background:var(--primary);width:0%;transition:width .2s}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-radius:50%;border-top-color:var(--secondary);animation:sp 1s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+input[type=file]{display:none}
+@media(max-width:700px){.right{width:100vw;position:absolute;inset:8px;z-index:5;border:1px solid var(--border);border-radius:10px;display:none}.right.open{display:flex}}
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>🧪 OCR Стенд (CRNN+CTC, браузер)</h1>
+    <select id="modelPick" title="Модель"></select>
+    <select id="screenPick" title="Скрин тестсета"></select>
+    <button class="btn secondary" id="btnLoadModel">⚙ Загрузить модель</button>
+    <label class="button outline" for="filePick">🖼 Своя картинка</label><input type="file" id="filePick" accept="image/*">
+    <button class="btn" id="btnOcr" disabled>🔍 Распознать</button>
+    <button class="btn outline" id="btnAll" disabled>🏁 Все 20 скринов</button>
+    <button class="btn outline" id="btnPanel">📋</button>
+</div>
+<div class="progress"><div class="pfill" id="pfill"></div></div>
+<div class="status" id="status">Выберите модель и нажмите «Загрузить модель»</div>
+<div class="main">
+    <div class="left"><canvas id="cv"></canvas></div>
+    <div class="right" id="panel">
+        <div class="panel-head"><strong>Строки</strong><span id="liner">—</span></div>
+        <div class="lines" id="lines"></div>
+        <div class="summary" id="summary"></div>
+    </div>
+</div>
+<script>
+"use strict";
+const CHARSET = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюяЇїІіЄєҐґ .,!?;:\"'«»„“”()[]—–-…№*/0123456789";
+const LAT = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const BLANK = 109, UNK = 110, LAT_OFF = 111, NC = 163, LINE_H = 32, MAX_DIM = 1400;
+const MODELS = [
+  ["best_sp_distill.onnx", "🏆 sp_distill (29/75 рекорд)"],
+  ["best_r30_final.onnx", "r30 (27/75 база APK)"],
+  ["best_sp_sfx.onnx", "sp_sfx (27/75, SFX+UI)"],
+  ["best_r31_final.onnx", "r31 (25/75)"],
+  ["best_sp_ui.onnx", "sp_ui (25/75, UI)"],
+  ["best_sp_serif.onnx", "sp_serif (25/75, декор)"],
+  ["best_sp_hand.onnx", "sp_hand (24/75, хэнд)"],
+  ["best_r28_final.onnx", "r28 (20/75 архив)"],
+];
+const $ = id => document.getElementById(id);
+let session = null, sessionName = "", GT = null, currentImg = null, currentImgName = "", busy = false;
+
+/* ---------- helpers: norm/lev/window (как в eval20) ---------- */
+function norm(s){ s = s.normalize('NFKC').toLowerCase().replaceAll('ё','е'); return s.replace(/[^0-9a-zа-яіїєґ]+/gu,'').replace(/[іїєґ]/g,''); }
+function lev(a,b){ if(a.length<b.length){const t=a;a=b;b=t;} let prev=[...Array(b.length+1).keys()];
+  for(let i=1;i<=a.length;i++){const cur=[i];for(let j=1;j<=b.length;j++)cur.push(Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]!==b[j-1])));prev=cur;} return prev[b.length]; }
+function bestWindow(gtN, hypN){ let best={sim:0,idx:-1}; if(!hypN.length) return best;
+  for(let gi=0;gi<gtN.length;gi++){const g=gtN[gi], n=hypN.length; if(n>g.length)continue;
+    for(let i=0;i<=g.length-n;i++){const w=g.slice(i,i+n); const sim=1-lev(hypN,w)/n; if(sim>best.sim)best={sim,idx:gi};}
+  } return best; }
+
+/* ---------- инициализация UI ---------- */
+(function init(){
+  MODELS.forEach(([f,label])=>{const o=document.createElement('option');o.value=f;o.textContent=label;$('modelPick').appendChild(o);});
+  for(let i=1;i<=20;i++){const s='s'+String(i).padStart(2,'0');const o=document.createElement('option');o.value=s;o.textContent='тест '+s;$('screenPick').appendChild(o);}
+  fetch('testset/gt20.json').then(r=>r.json()).then(j=>{GT=j;}).catch(()=>{});
+})();
+$('btnLoadModel').onclick = loadModel;
+$('btnOcr').onclick = ()=>{ if(currentImg) runOcr(currentImg, currentImgName); };
+$('btnAll').onclick = runAll;
+$('btnPanel').onclick = ()=>$('panel').classList.toggle('open');
+$('screenPick').onchange = e=>loadTestset(e.target.value);
+$('filePick').onchange = e=>{ const f=e.target.files[0]; if(!f)return; const im=new Image(); im.onload=()=>{currentImg=im;currentImgName='своя картинка';drawBase(im);status('Готово — жмите «Распознать»');}; im.src=URL.createObjectURL(f); };
+
+function status(t){$('status').innerHTML=t;}
+function frac(f){$('pfill').style.width=(f*100).toFixed(0)+'%';}
+
+async function loadModel(){
+  if(busy)return; busy=true; $('btnLoadModel').disabled=true;
+  const f=$('modelPick').value;
+  try{
+    status('<span class="spin"></span>Загружаю модель '+f+' …');
+    const t0=performance.now();
+    session = await ort.InferenceSession.create('models/'+f, {executionProviders:['wasm']});
+    sessionName=f;
+    $('btnOcr').disabled=false; $('btnAll').disabled=false;
+    status('✅ Модель загружена за '+((performance.now()-t0)/1000).toFixed(1)+'с — выбирайте скрин');
+  }catch(e){ status('❌ '+e.message); }
+  busy=false; $('btnLoadModel').disabled=false;
+}
+
+function loadTestset(key){
+  if(!key)return;
+  const url='testset/'+key+'.png';
+  const jpg='testset/'+key+'.jpg';
+  const im=new Image();
+  im.onload=()=>{currentImg=im;currentImgName=key;drawBase(im);status('Скрин '+key+' загружен — жмите «Распознать»');};
+  im.onerror=()=>{const im2=new Image();im2.onload=()=>{currentImg=im2;currentImgName=key;drawBase(im2);};im2.src=jpg;};
+  im.src=url;
+}
+
+function drawBase(im, boxes){
+  const c=$('cv'); const sc=Math.min(1, MAX_DIM/Math.max(im.width, im.height));
+  const W=Math.max(1,Math.round(im.width*sc)), H=Math.max(1,Math.round(im.height*sc));
+  c.width=W; c.height=H;
+  const g=c.getContext('2d'); g.drawImage(im,0,0,W,H);
+  if(boxes){ g.lineWidth=2;
+    for(const b of boxes){ g.strokeStyle=b.hit==='hit'?'#4CAF50':(b.hit==='close'?'#ff9800':'#2196F3'); g.strokeRect(b.x,b.y,b.w,b.h); }
+  }
+  return {g,W,H,sc};
+}
+
+/* ---------- сегментация (упрощённый порт конвейера на JS) ---------- */
+function getLuma(g,W,H){
+  const d=g.getImageData(0,0,W,H).data, n=W*H, lu=new Float32Array(n);
+  for(let i=0;i<n;i++){const j=i*4; lu[i]=0.299*d[j]+0.587*d[j+1]+0.114*d[j+2];}
+  return lu;
+}
+function minmaxFilter(src,W,H,rad,isMax){
+  const tmp=new Float32Array(src.length), out=new Float32Array(src.length);
+  for(let y=0;y<H;y++){const off=y*W;for(let x=0;x<W;x++){let v=isMax?0:1e9;
+    const x0=Math.max(0,x-rad),x1=Math.min(W-1,x+rad);
+    for(let k=x0;k<=x1;k++){const s=src[off+k]; if(isMax?v<s:v>s)v=s;}
+    tmp[off+x]=v;}}
+  for(let x=0;x<W;x++){for(let y=0;y<H;y++){let v=isMax?0:1e9;
+    const y0=Math.max(0,y-rad),y1=Math.min(H-1,y+rad);
+    for(let k=y0;k<=y1;k++){const s=tmp[k*W+x]; if(isMax?v<s:v>s)v=s;}
+    out[y*W+x]=v;}}
+  return out;
+}
+function textMask(lu,W,H,dark){
+  // мультиклассовая бинаризация: тёмный текст по порогам / светлый текст по порогам
+  const thsD=[110,140,170,200,230], thsL=[25,45,70,100,140];
+  const masks=[];
+  for(const T of thsD){const m=new Uint8Array(W*H);for(let i=0;i<m.length;i++)if(lu[i]<T)m[i]=1;masks.push([m,0]);}
+  for(const T of thsL){const m=new Uint8Array(W*H);for(let i=0;i<m.length;i++)if(lu[i]>=T)m[i]=1;masks.push([m,1]);}
+  return masks;
+}
+function openMorph(m,W,H){
+  // open = erode+dilate 3x3 (убить тонкие линии арта)
+  const e=new Uint8Array(m.length);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    let v=1;
+    for(let dy=-1;dy<=1&&v;dy++)for(let dx=-1;dx<=1&&v;dx++){
+      const yy=y+dy,xx=x+dx; if(xx<0||yy<0||xx>=W||yy>=H||!m[yy*W+xx])v=0;}
+    e[y*W+x]=v;
+  }
+  const d2=new Uint8Array(m.length);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    let v=0;
+    for(let dy=-1;dy<=1&&!v;dy++)for(let dx=-1;dx<=1&&!v;dx++){
+      const yy=y+dy,xx=x+dx; if(xx>=0&&yy>=0&&xx<W&&yy<H&&e[yy*W+xx])v=1;} 
+    d2[y*W+x]=v;
+  }
+  return d2;
+}
+function comps(m,W,H){
+  const lab=new Int32Array(W*H).fill(-1), boxes=[];
+  let id=0; const stack=[];
+  for(let s=0;s<m.length;s++){
+    if(!m[s]||lab[s]>=0)continue;
+    let minx=W,maxx=0,miny=H,maxy=0,cnt=0; stack.push(s); lab[s]=id;
+    while(stack.length){const p=stack.pop(),py=(p/W)|0,px=p%W;
+      if(px<minx)minx=px; if(px>maxx)maxx=px; if(py<miny)miny=py; if(py>maxy)maxy=py; cnt++;
+      if(px>0&&m[p-1]&&lab[p-1]<0){lab[p-1]=id;stack.push(p-1);}
+      if(px<W-1&&m[p+1]&&lab[p+1]<0){lab[p+1]=id;stack.push(p+1);}
+      if(py>0&&m[p-W]&&lab[p-W]<0){lab[p-W]=id;stack.push(p-W);}
+      if(py<H-1&&m[p+W]&&lab[p+W]<0){lab[p+W]=id;stack.push(p+W);}
+    }
+    boxes.push({x:minx,y:miny,w:maxx-minx+1,h:maxy-miny+1,a:cnt});
+    id++;
+    if(id>60000)break;
+  }
+  return boxes;
+}
+function linesFromBoxes(boxes,W,H){
+  // фильтр букв → группировка по строкам
+  const hs=boxes.filter(b=>b.h>=7&&b.h<=H*0.08&&b.w>=3&&b.w<=W*0.6&&b.a>=10);
+  hs.sort((a,b)=>(a.y+a.h/2)-(b.y+b.h/2));
+  const rows=[];
+  for(const b of hs){
+    let placed=false;
+    for(const r of rows){
+      const o=Math.min(b.y+b.h,r.y1)-Math.max(b.y,r.y0);
+      if(o>0.5*Math.min(b.h,r.y1-r.y0)){r.bs.push(b);r.y0=Math.min(r.y0,b.y);r.y1=Math.max(r.y1,b.y+b.h);placed=true;break;}
+    }
+    if(!placed)rows.push({y0:b.y,y1:b.y+b.h,bs:[b]});
+  }
+  const lines=[];
+  for(const r of rows){
+    if(r.bs.length<2&&!(r.bs[0].w>12&&r.bs[0].h>10))continue;
+    r.bs.sort((a,b)=>a.x-b.x);
+    const mw=r.bs.reduce((s,b)=>s+b.w,0)/r.bs.length;
+    let cx=r.bs[0].x, cx2=r.bs[0].x+r.bs[0].w, cy0=r.bs[0].y, cy1=r.bs[0].y+r.bs[0].h;
+    for(let i=1;i<r.bs.length;i++){
+      const b=r.bs[i], gap=b.x-cx2;
+      if(gap>mw*3.2){
+        lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0});
+        cx=b.x;cy0=b.y;cy1=b.y+b.h;
+      } else {cy0=Math.min(cy0,b.y);cy1=Math.max(cy1,b.y+b.h);}
+      cx2=Math.max(cx2,b.x+b.w);
+    }
+    lines.push({x:cx,y:cy0,w:cx2-cx,h:cy1-cy0});
+  }
+  return lines.filter(l=>l.w>=14&&l.h>=8);
+}
+function segmentJS(lu,W,H){
+  // средняя яркость → полярность страницы не фиксируем, берём обе
+  const masks=textMask(lu,W,H);
+  let all=[];
+  for(const [m,pol] of masks){
+    const mo=openMorph(m,W,H);
+    const boxes=comps(mo,W,H);
+    const lines=linesFromBoxes(boxes,W,H).map(l=>({...l,pol}));
+    all=all.concat(lines);
+  }
+  // дедуп по IoU 0.5, приоритет полярности страницы (тёмного меньше)
+  const dark=(()=>{let s=0,n=0;for(let i=0;i<lu.length;i+=7){s+=lu[i];n++;}return s/n<100;})();
+  all.sort((a,b)=>(a.pol===(dark?1:0)?0:1)-(b.pol===(dark?1:0)?0:1) || a.y-b.y || a.x-b.x);
+  const keep=[];
+  for(const b of all){
+    let dup=false;
+    for(const k of keep){
+      const ox=Math.max(b.x,k.x),oy=Math.max(b.y,k.y);
+      const iw=Math.min(b.x+b.w,k.x+k.w)-ox, ih=Math.min(b.y+b.h,k.y+k.h)-oy;
+      const inter=Math.max(0,iw)*Math.max(0,ih);
+      if(inter>0.55*b.w*b.h||inter>0.55*k.w*k.h){dup=true;break;}
+    }
+    if(!dup)keep.push(b);
+    if(keep.length>400)break;
+  }
+  keep.sort((a,b)=>a.y-b.y||a.x-b.x);
+  return keep;
+}
+
+/* ---------- OCR строки ---------- */
+async function ocrLine(g,W,H,b){
+  const pad=2;
+  const x=Math.max(0,b.x-pad),y=Math.max(0,b.y-pad);
+  const w=Math.min(W,b.x+b.w+pad)-x, h=Math.min(H,b.y+b.h+pad)-y;
+  if(w<4||h<4)return null;
+  let newW=Math.max(8,Math.round(w*LINE_H/h)); newW=Math.min(444,newW);
+  const padW=Math.ceil((newW+4)/8)*8;
+  const off=document.createElement('canvas'); off.width=padW; off.height=LINE_H;
+  const og=off.getContext('2d'); og.fillStyle='#fff'; og.fillRect(0,0,padW,LINE_H);
+  og.drawImage($('cv'),x,y,w,h,4,0,newW,LINE_H);
+  const d=og.getImageData(0,0,padW,LINE_H).data;
+  const xin=new Float32Array(padW*LINE_H).fill(1);
+  for(let i=0;i<padW*LINE_H;i++){const j=i*4; let v=(0.299*d[j]+0.587*d[j+1]+0.114*d[j+2])/255; xin[i]=v;}
+  if(b.pol){for(let i=0;i<xin.length;i++)xin[i]=1-xin[i];}
+  const t=new ort.Tensor('float32',xin,[1,1,LINE_H,padW]);
+  const out=await session.run({x:t});
+  const raw=out[Object.keys(out)[0]].data;
+  const T2=padW/4;
+  let prev=-2, probs=[], chars=[];
+  for(let s=0;s<T2;s++){
+    const off2=s*NC; let bi=0,bv=-1e9;
+    for(let k=0;k<NC;k++){const v=raw[off2+k]; if(v>bv){bv=v;bi=k;}}
+    if(bi===BLANK||bi===UNK){prev=bi;continue;}
+    if(bi!==prev&&bi>=0){
+      let c; if(bi>=LAT_OFF&&bi<NC)c=LAT[bi-LAT_OFF]; else if(bi<CHARSET.length)c=CHARSET[bi]; else c='�';
+      chars.push(c);
+      let sum=0;for(let k=0;k<NC;k++)sum+=Math.exp(raw[off2+k]-bv);
+      probs.push(Math.exp(bv-bv)/sum*Math.exp(0)); // =e^0/sumScaled
+      // переиграем: вероятность = 1/Σe^(v_k-v_max) * e^(v_max-v_max)=1/sum → ok
+    }
+    prev=bi;
+  }
+  probs=probs.map(p=>p);
+  probs.sort((a,b2)=>a-b2);
+  const conf=probs.length?probs[Math.floor(probs.length/2)]:0;
+  let text=chars.join('').replace(/\s+/g,' ').trim();
+  while(text.includes('……'))text=text.replaceAll('……','…');
+  return {text,conf};
+}
+
+/* ---------- запуск OCR по изображению ---------- */
+async function runOcr(im,name){
+  if(busy||!session)return; busy=true; $('btnOcr').disabled=true; $('btnAll').disabled=true;
+  const {g,W,H}=drawBase(im);
+  status('<span class="spin"></span>Сегментация '+name+' …'); await new Promise(r=>setTimeout(r,10));
+  const lu=getLuma(g,W,H);
+  const boxes=segmentJS(lu,W,H);
+  const gtLines=(GT&&GT[name])?GT[name]:null;
+  const gtN=gtLines?gtLines.map(norm):null;
+  const results=[]; let hits=0,soft=0,softN=0;
+  for(let i=0;i<boxes.length;i++){
+    frac(i/boxes.length); status('<span class="spin"></span>OCR '+name+' строка '+(i+1)+'/'+boxes.length);
+    const r=await ocrLine(g,W,H,boxes[i]);
+    if(!r||!r.text){continue;}
+    let sim=0,cls='miss';
+    if(gtLines){const bw=bestWindow(gtN,norm(r.text));sim=bw.sim;cls=sim>=0.999?'hit':(sim>=0.75?'close':'miss');
+      if(sim>=0.999)hits++; if(norm(r.text).length>=3){soft+=sim;softN++;}}
+    results.push({...r,...boxes[i],sim:gtLines?sim:null,cls});
+  }
+  drawBase(im,results.map(b=>({...b,hit:b.cls})));
+  frac(1);
+  showLines(results,gtLines);
+  const acc=gtLines?` — GT-попадания: <b>${hits}/${gtLines.length}</b>, SOFT≈${softN?(soft/softN*100).toFixed(0):0}%`:'';
+  status('✅ '+name+': строк '+results.length+acc);
+  busy=false; $('btnOcr').disabled=false; $('btnAll').disabled=false;
+}
+
+function showLines(results,gtLines){
+  const el=$('lines'); el.innerHTML='';
+  $('liner').textContent=results.length+' строк';
+  for(const r of results){
+    const d=document.createElement('div'); d.className='card '+r.cls;
+    let meta=`<div class="meta"><span>[${r.x},${r.y} ${r.w}×${r.h}]</span><span>conf ${r.conf.toFixed(2)}${r.sim!=null?' · sim '+r.sim.toFixed(2):''}</span></div>`;
+    d.innerHTML=meta+'<div>'+esc(r.text)+'</div>';
+    if(r.sim!=null&&r.sim<0.999&&GT){
+      // покажем лучшую GT-строку
+      let best=null,bs=0; for(const g of Object.values(GT).flat()){const s=1-lev(norm(r.text),norm(g))/Math.max(1,norm(g).length); if(s>bs){bs=s;best=g;}}
+      if(best&&bs>0.35)d.innerHTML+='<div class="gt">≈ '+esc(best)+' ('+bs.toFixed(2)+')</div>';
+    }
+    el.appendChild(d);
+  }
+  $('panel').classList.add('open');
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+/* ---------- пакетный прогон всех 20 скринов ---------- */
+async function runAll(){
+  if(busy||!session)return; busy=true; $('btnOcr').disabled=true; $('btnAll').disabled=true;
+  let totalHit=0,totalGT=0,totalSoft=0,totalSoftN=0; const rows=[];
+  for(let i=1;i<=20;i++){
+    const key='s'+String(i).padStart(2,'0');
+    status('<span class="spin"></span>Пакет: загружаю '+key+' …');
+    const im=await loadImg('testset/'+key+'.png','testset/'+key+'.jpg');
+    const {g,W,H}=drawBase(im);
+    const lu=getLuma(g,W,H);
+    const boxes=segmentJS(lu,W,H);
+    const gt=GT[key]; const gtN=gt.map(norm);
+    let hits=0,soft=0,softN=0;
+    for(let bi=0;bi<boxes.length;bi++){
+      status('<span class="spin"></span>Пакет '+key+' строка '+(bi+1)+'/'+boxes.length);
+      frac((i-1+ bi/boxes.length)/20);
+      const r=await ocrLine(g,W,H,boxes[bi]);
+      if(!r||!r.text)continue;
+      const bw=bestWindow(gtN,norm(r.text));
+      if(norm(r.text).length>=3){softN++;soft+=bw.sim;}
+      if(bw.sim>=0.999)hits++;
+    }
+    totalHit+=hits;totalGT+=gt.length;totalSoft+=soft;totalSoftN+=softN;
+    rows.push([key,hits,gt.length,softN?(soft/softN*100).toFixed(0):'—']);
+  }
+  frac(1);
+  const score=(totalHit/75*100).toFixed(1), sm=(totalSoft/Math.max(1,totalSoftN)*100).toFixed(1);
+  let h=`<b>${sessionName}</b><br>SCORE=<b>${(totalHit/75).toFixed(3)}</b> (${totalHit}/75) · SOFT=${sm}%<br><br><table class="results"><tr><th>скрин</th><th>hits</th><th>из</th><th>soft%</th></tr>`;
+  for(const r of rows)h+=`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`;
+  $('summary').innerHTML=h+'</table>';
+  $('panel').classList.add('open');
+  status(`✅ Все 20: SCORE=${totalHit}/75 (${score}%), SOFT≈${sm}%`);
+  busy=false; $('btnOcr').disabled=false; $('btnAll').disabled=false;
+}
+function loadImg(u1,u2){return new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>{const i2=new Image();i2.onload=()=>res(i2);i2.src=u2;};im.src=u1;});}
+</script>
+</body>
+</html>
