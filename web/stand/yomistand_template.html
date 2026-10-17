@@ -521,6 +521,105 @@ function keepLine(text,conf){
   return conf>=0.22;
 }
 
+/* =============== СТРАТЕГИЯ ocbz: строки → union-find пузыри → 2-й проход =============== */
+/* склейка единиц в баблы: рядом (v_overlap>0.4h, h_gap<2h) или друг под другом (v_gap<2.5h, h_overlap>20%) */
+function groupLinesToBlocks(lines){
+  const N=lines.length;if(!N)return [];
+  const parent=[...Array(N).keys()];
+  const find=i=>parent[i]===i?i:(parent[i]=find(parent[i]));
+  const union=(i,j)=>{parent[find(i)]=find(j);};
+  for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){
+    const a=lines[i],b=lines[j];
+    const avg_h=(a.h+b.h)/2;
+    const h_gap=Math.max(0,Math.max(a.x,b.x)-Math.min(a.x+a.w,b.x+b.w));
+    const v_gap=Math.max(0,Math.max(a.y,b.y)-Math.min(a.y+a.h,b.y+b.h));
+    const h_ovl=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
+    const v_ovl=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+    if(v_ovl>avg_h*0.4&&h_gap<avg_h*2.0)union(i,j);
+    else if(v_gap<avg_h*2.5&&h_ovl>Math.min(a.w,b.w)*0.2)union(i,j);
+  }
+  const groups={};
+  for(let i=0;i<N;i++){const r=find(i);(groups[r]=groups[r]||[]).push(lines[i]);}
+  return Object.values(groups).map(g=>{
+    const x0=Math.min(...g.map(l=>l.x)),y0=Math.min(...g.map(l=>l.y));
+    const x1=Math.max(...g.map(l=>l.x+l.w)),y1=Math.max(...g.map(l=>l.y+l.h));
+    const sorted=[...g].sort((a,b)=>(Math.abs(a.y-b.y)>10?a.y-b.y:a.x-b.x));
+    let text='',lastY=-1;
+    for(const l of sorted){if(lastY!==-1&&Math.abs(l.y-lastY)>15)text+='\n';else if(text&&!text.endsWith('\n'))text+=' ';text+=l.text;lastY=l.y;}
+    const avgConf=g.reduce((s,l)=>s+l.conf,0)/g.length;
+    const pol=g.filter(l=>l.pol===1).length>g.length/2?1:0; // полярность по большинству строк
+    return {x:x0,y:y0,width:x1-x0,height:y1-y0,text:text.trim(),avgConf,pol,lines:g};
+  });
+}
+/* фильтр мусора (пороги ocbz, massштаб-инвариантно) */
+function blockOK(b,W,H){
+  if(b.width<Math.max(24,W*0.02)||b.height<Math.max(15,H*0.015))return false;
+  if(b.avgConf<0.5)return false;
+  const rus=(b.text.match(/[а-яА-ЯёЁ]/g)||[]).length;
+  const tot=b.text.replace(/\s/g,'').length;
+  if(tot===0)return false;
+  if(rus/tot<0.4){const punct=tot<=6&&/[!?…]/.test(b.text);return punct&&b.avgConf>=0.65;}
+  return true;
+}
+/* сортировка баблов по режиму чтения */
+function sortBlocksM(blocks){
+  const m=mode();
+  return blocks.sort((a,b)=>{
+    if(m==='vertical')return a.y-b.y;
+    const tol=Math.max(a.height,b.height)*0.8;
+    if(Math.abs(a.y-b.y)<tol)return m==='rtl'?b.x-a.x:a.x-b.x;
+    return a.y-b.y;
+  });
+}
+function lightClean(t){return (t||'').replace(/[^\S\n]+/g,' ').trim();}
+/* словарь замен (из ocbz, без изменений) */
+const REPL=[
+  {regex:/\b208\b/gi, replace:'ЗОВ'},
+  {regex:/\bВАЕСТЕ-?АМ\b/gi, replace:'БЛЕСТЕЛИ'},
+  {regex:/\bМРУБЛИАА\b/gi, replace:'ПРИБЫЛА'},
+  {regex:/\bВУАЕТЕ\b/gi, replace:'БУДЕТЕ'},
+  {regex:/(?:3|З)[\s\n]*(?:И|U|u)[\s\n]*ЭРЛ[!]?/gi, replace:'ОРДЕН!'},
+  {regex:/\b(ДК|дк)\b/gi, replace:'ЭЙ'},
+  {regex:/\bНН\b/gi, replace:'ЭЙ'},
+  {regex:/\bИ\s*З\s*З\s*А\b/gi, replace:'ИЗ-ЗА'},
+  {regex:/\bПО\s*-\s*/gi, replace:'ПО-'},
+  {regex:/\bА\s*ОЧЕНЬ\b/gi, replace:'ТЫ ОЧЕНЬ'}
+];
+/* жёсткая очистка (построчно, переносы сохраняем для оверлея) */
+function cleanupText(txt){
+  return (txt||'').split('\n').map(line=>{
+    let t=line.trim();
+    t=t.replace(/\b[a-zA-Z]{1,10}\b/g,'');          // английский мусор
+    t=t.replace(/[|©№=~_\\\/\[\]\{\}<>]/g,'');      // спецсимволы
+    t=t.replace(/[^\S\n]+/g,' ').trim();
+    t=t.replace(/([а-яА-ЯёЁ]+)[-—–]\s*([а-яА-ЯёЁ]+)/g,'$1$2'); // склейка переносов
+    REPL.forEach(r=>{t=t.replace(r.regex,r.replace);});
+    return t;
+  }).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+/* ПРОХОД B: перечтение бабла — локальная сегментация по его кропу,
+   линии по y, тексты склеиваются переносами строк */
+async function readBlock(p,b){
+  const pad=6;
+  const x=Math.max(0,b.x-pad),y=Math.max(0,b.y-pad);
+  const w=Math.min(p.W,b.x+b.width+pad)-x,h=Math.min(p.H,b.y+b.height+pad)-y;
+  if(w<8||h<8)return '';
+  let boxes;
+  try{
+    const sub=new Float32Array(w*h);
+    for(let yy=0;yy<h;yy++)sub.set(p.lu.subarray((y+yy)*p.W+x,(y+yy)*p.W+x+w),yy*w);
+    boxes=segmentJS(sub,w,h);
+  }catch(e){return '';}
+  const found=[];
+  for(const bx of boxes){
+    const r=await ocrLine(p,{x:bx.x+x,y:bx.y+y,w:bx.w,h:bx.h});
+    if(r&&r.text&&keepLine(r.text,r.conf))found.push({t:r.text,bx});
+  }
+  if(!found.length)return '';
+  found.sort((a,c)=>a.bx.y-c.bx.y||a.bx.x-c.bx.x);
+  return found.map(f=>f.t).join('\n');
+}
+
 /* =============== очередь OCR =============== */
 function enqueue(fn){q.push(fn);if(!qRun)nextQ();}
 async function nextQ(){
@@ -547,17 +646,35 @@ async function ocrPage(p,force){
   const boxes=segmentJS(p.lu,p.W,p.H);
   const gtLines=(GT&&testKey&&GT[testKey]&&pages.length===1)?GT[testKey]:null;
   const gtN=gtLines?gtLines.map(norm):null;
+  /* ПРОХОД A: строки */
   const lines=[];
   for(let i=0;i<boxes.length;i++){
-    status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': строка '+(i+1)+'/'+boxes.length);
-    frac((i+1)/boxes.length);
+    status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': строки '+(i+1)+'/'+boxes.length);
+    frac((i+1)/Math.max(1,boxes.length)*0.5);
     const r=await ocrLine(p,boxes[i]);
     if(!r||!r.text||!keepLine(r.text,r.conf))continue;
-    const L={x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:r.pol,text:r.text,conf:r.conf,idx:lines.length,sim:null,cls:''};
-    if(gtN){const bw=bestWindow(gtN,norm(r.text));L.sim=bw.sim;L.cls=L.sim>=0.999?'hit':(L.sim>=0.75?'close':'miss');}
-    lines.push(L);
+    lines.push({x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,text:r.text,conf:r.conf,pol:r.pol});
   }
-  p.lines=lines;p.done=true;p.session=sessionName;
+  /* склейка в пузыри + фильтр мусора */
+  let blocks=groupLinesToBlocks(lines);
+  blocks=blocks.filter(b=>blockOK(b,p.W,p.H));
+  blocks=sortBlocksM(blocks);
+  /* ПРОХОД B: перечтение каждого пузыря своим кропом */
+  const out=[];
+  for(let i=0;i<blocks.length;i++){
+    status('<span class="spin"></span>Стр. '+(pages.indexOf(p)+1)+': бабл '+(i+1)+'/'+blocks.length);
+    frac(0.5+(i+1)/Math.max(1,blocks.length)*0.5);
+    const b=blocks[i];
+    let t='';
+    try{t=cleanupText(await readBlock(p,b));}catch(e){}
+    if(!t||t.length<2)t=lightClean(b.text); // фолбэк на текст 1-го прохода
+    if(!t)continue;
+    const B={x:b.x,y:b.y,w:b.width,h:b.height,pol:b.pol,text:t,conf:b.avgConf,
+      rawLines:b.lines.map(l=>l.text),idx:out.length,sim:null,cls:''};
+    if(gtN){const bw=bestWindow(gtN,norm(t));B.sim=bw.sim;B.cls=B.sim>=0.999?'hit':(B.sim>=0.75?'close':'miss');}
+    out.push(B);
+  }
+  p.lines=out;p.done=true;p.session=sessionName;
   layoutOverlay(p);
   activePage=pages.indexOf(p);
   renderTextTab();
@@ -577,19 +694,36 @@ async function ocrRegion(p,rect){
   status('<span class="spin"></span>Сканирую выделение…');
   await new Promise(r=>setTimeout(r,15));
   const boxes=segmentJS(sub,rect.w,rect.h);
-  for(const b of boxes){b.x+=rect.x;b.y+=rect.y;}
-  // выкинуть старые строки, чей центр внутри рамки
+  /* ПРОХОД A по рамке */
+  const lines=[];
+  for(let i=0;i<boxes.length;i++){
+    status('<span class="spin"></span>Выделение: строки '+(i+1)+'/'+boxes.length);
+    frac((i+1)/Math.max(1,boxes.length)*0.5);
+    const r=await ocrLine(p,{x:boxes[i].x+rect.x,y:boxes[i].y+rect.y,w:boxes[i].w,h:boxes[i].h});
+    if(!r||!r.text||!keepLine(r.text,r.conf))continue;
+    lines.push({x:boxes[i].x+rect.x,y:boxes[i].y+rect.y,w:boxes[i].w,h:boxes[i].h,text:r.text,conf:r.conf,pol:r.pol});
+  }
+  /* склейка в пузыри (фильтр мягче — рамка уже мала) */
+  let blocks=groupLinesToBlocks(lines);
+  blocks=blocks.filter(b=>b.avgConf>=0.45&&((b.width>=20&&b.height>=14)||b.text.replace(/\s/g,'').length>1));
+  blocks=sortBlocksM(blocks);
+  /* выкинуть старые плашки, чей центр внутри рамки */
   p.lines=p.lines.filter(L=>{
     const cx=L.x+L.w/2,cy=L.y+L.h/2;
     return !(cx>=rect.x&&cx<=rect.x+rect.w&&cy>=rect.y&&cy<=rect.y+rect.h);
   });
+  /* ПРОХОД B */
   let added=0;
-  for(let i=0;i<boxes.length;i++){
-    status('<span class="spin"></span>Выделение: строка '+(i+1)+'/'+boxes.length);
-    frac((i+1)/Math.max(1,boxes.length));
-    const r=await ocrLine(p,boxes[i]);
-    if(!r||!r.text||!keepLine(r.text,r.conf))continue;
-    p.lines.push({x:boxes[i].x,y:boxes[i].y,w:boxes[i].w,h:boxes[i].h,pol:r.pol,text:r.text,conf:r.conf,idx:p.lines.length,sim:null,cls:''});
+  for(let i=0;i<blocks.length;i++){
+    status('<span class="spin"></span>Выделение: бабл '+(i+1)+'/'+blocks.length);
+    frac(0.5+(i+1)/Math.max(1,blocks.length)*0.5);
+    const b=blocks[i];
+    let t='';
+    try{t=cleanupText(await readBlock(p,b));}catch(e){}
+    if(!t||t.length<2)t=lightClean(b.text);
+    if(!t)continue;
+    p.lines.push({x:b.x,y:b.y,w:b.width,h:b.height,pol:b.pol,text:t,conf:b.avgConf,
+      rawLines:b.lines.map(l=>l.text),idx:0,sim:null,cls:''});
     added++;
   }
   p.lines.sort((a,b)=>a.y-b.y||a.x-b.x);
@@ -597,7 +731,7 @@ async function ocrRegion(p,rect){
   layoutOverlay(p);
   activePage=pages.indexOf(p);
   renderTextTab();
-  toast(added?('✂ +'+added+' строк в рамке'):'✂ В рамке текст не найден');
+  toast(added?('✂ +'+added+' баблов в рамке'):'✂ В рамке текст не найден');
 }
 
 /* =============== авто-OCR при прокрутке =============== */
@@ -678,14 +812,17 @@ function layoutOverlay(p){
   }
 }
 function fitText(meas,text,maxW,maxH,fs){
-  const words=text.split(/\s+/).filter(Boolean);
-  if(!words.length)return true;
   const lh=fs*1.12;
-  let lines=1,cur='';
-  for(const w of words){
-    const j=cur?cur+' '+w:w;
-    if(meas.measureText(j).width<=maxW){cur=j;}
-    else{lines++;cur=w;if(meas.measureText(w).width>maxW)return false;}
+  let lines=0;
+  for(const para of text.split(/\n/)){
+    const words=para.split(/\s+/).filter(Boolean);
+    if(!words.length){lines++;continue;}
+    lines++; let cur='';
+    for(const w of words){
+      const j=cur?cur+' '+w:w;
+      if(meas.measureText(j).width<=maxW){cur=j;}
+      else{lines++;cur=w;if(meas.measureText(w).width>maxW)return false;}
+    }
   }
   return lines*lh<=maxH;
 }
@@ -722,9 +859,10 @@ function renderTextTab(){
   }
   const head=document.createElement('div');
   head.className='hgrow';
-  head.innerHTML='<b>Стр. '+(activePage+1)+' — '+p.lines.length+' строк</b><span style="font-size:11px;color:var(--muted)">'+esc(p.name)+'</span>';
+  head.innerHTML='<b>Стр. '+(activePage+1)+' — '+p.lines.length+' бабл.</b><span style="font-size:11px;color:var(--muted)">'+esc(p.name)+'</span>';
   el.appendChild(head);
   const gtLines=(GT&&testKey&&GT[testKey]&&pages.length===1)?GT[testKey]:null;
+  const gtN=gtLines?gtLines.map(norm):null;
   let hits=0,soft=0,softN=0;
   if(!p.lines.length){
     const em=document.createElement('div');em.className='empty';
@@ -735,18 +873,23 @@ function renderTextTab(){
     const d=document.createElement('div');
     d.className='card '+(L.sim!=null?L.cls:'');
     d.dataset.i=L.idx;
-    let meta='<span>conf '+L.conf.toFixed(2)+'</span><span>['+L.x+','+L.y+' '+L.w+'×'+L.h+']</span>';
-    if(L.sim!=null){meta='<span>sim '+L.sim.toFixed(2)+'</span>'+meta;
-      if(L.sim>=0.999)hits++;
-      if(norm(L.text).length>=3){soft+=L.sim;softN++;}}
-    d.innerHTML='<div class="meta">'+meta+'</div><div>'+esc(L.text)+'</div>';
+    let meta='<span>conf '+L.conf.toFixed(2)+'</span><span>['+L.x+','+L.y+' '+L.w+'×'+L.h+']'+(L.rawLines?' · '+L.rawLines.length+' стр.':'')+'</span>';
+    if(L.sim!=null)meta='<span>sim '+L.sim.toFixed(2)+'</span>'+meta;
+    d.innerHTML='<div class="meta">'+meta+'</div><div style="white-space:pre-wrap">'+esc(L.text)+'</div>';
     d.onclick=()=>{hlLine(p,L.idx);};
     el.appendChild(d);
+    if(gtN){
+      for(const t of (L.rawLines||[L.text])){
+        const bw=bestWindow(gtN,norm(t));
+        if(bw.sim>=0.999)hits++;
+        if(norm(t).length>=3){soft+=bw.sim;softN++;}
+      }
+    }
   }
   if(gtLines){
     const s=document.createElement('div');
     s.className='summary';
-    s.innerHTML='GT: <b>'+hits+'/'+gtLines.length+'</b> · SOFT≈'+(softN?(soft/softN*100).toFixed(0):0)+'%';
+    s.innerHTML='GT (по сырым строкам): <b>'+hits+'/'+gtLines.length+'</b> · SOFT≈'+(softN?(soft/softN*100).toFixed(0):0)+'%';
     el.appendChild(s);
   }
 }
@@ -778,8 +921,9 @@ $('screenPick').onchange=e=>{
   buildViewer();
   enqueue(async()=>{await ocrPage(p,true);
     const gtN=GT[key].map(norm);let hits=0;
-    for(const L of p.lines){const bw=bestWindow(gtN,norm(L.text));if(bw.sim>=0.999)hits++;}
-    status('✅ '+key+': '+p.lines.length+' строк, GT '+hits+'/'+GT[key].length);
+    for(const L of p.lines)for(const t of (L.rawLines||[L.text]))
+      {const bw=bestWindow(gtN,norm(t));if(bw.sim>=0.999)hits++;}
+    status('✅ '+key+': '+p.lines.length+' бабл., GT '+hits+'/'+GT[key].length);
   });
 };
 $('btnAll').onclick=async()=>{
