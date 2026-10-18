@@ -493,17 +493,19 @@ async function ocrLine(p,b){
   if(polEff)for(let i=0;i<xin.length;i++)xin[i]=1-xin[i];
   const t=new ort.Tensor('float32',xin,[1,1,LINE_H,padW]);
   const out=await session.run({x:t});
-  const raw=out[Object.keys(out)[0]].data;
-  const T2=padW/4;
+  const outT=out[Object.keys(out)[0]];
+  const raw=outT.data;
+  const D=outT.dims;
+  const T2=D[D.length-2], NC2=D[D.length-1];   // реальные размеры выхода, иначе хвостовой таймшаг читает мусор → лишняя «А»
   let prev=-2;const probs=[],chars=[];
   for(let st=0;st<T2;st++){
-    const o2=st*NC;let bi=0,bv=-1e9;
-    for(let k=0;k<NC;k++){const v=raw[o2+k];if(v>bv){bv=v;bi=k;}}
+    const o2=st*NC2;let bi=0,bv=-1e9;
+    for(let k=0;k<NC2;k++){const v=raw[o2+k];if(v>bv){bv=v;bi=k;}}
     if(bi===BLANK||bi===UNK){prev=bi;continue;}
     if(bi!==prev&&bi>=0){
-      let c;if(bi>=LAT_OFF&&bi<NC)c=LAT[bi-LAT_OFF];else if(bi<CHARSET.length)c=CHARSET[bi];else c='�';
+      let c;if(bi>=LAT_OFF&&bi<NC2)c=LAT[bi-LAT_OFF];else if(bi<CHARSET.length)c=CHARSET[bi];else c='�';
       chars.push(c);
-      let sum=0;for(let k=0;k<NC;k++)sum+=Math.exp(raw[o2+k]-bv);
+      let sum=0;for(let k=0;k<NC2;k++)sum+=Math.exp(raw[o2+k]-bv);
       probs.push(1/sum);}
     prev=bi;}
   const ps=[...probs].sort((a,b)=>a-b);
@@ -986,10 +988,6 @@ viewer.addEventListener('pointercancel',dropPt);
 
 renderTextTab();
 loadEmbeddedModel(EMBED.models[0].name);
-</script>
-</body>
-</html>
-D.models[0].name);
 </script>
 </body>
 </html>
