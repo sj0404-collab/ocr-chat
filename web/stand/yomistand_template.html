@@ -518,9 +518,10 @@ async function ocrLine(p,b){
 function keepLine(text,conf){
   const n=norm(text);
   if(n.length===0)return conf>=0.55;
-  if(n.length<=2)return conf>=0.6;
-  if(!/[а-я]/.test(n)&&n.length<=4)return conf>=0.7;
-  return conf>=0.22;
+  if(n.length<=2)return conf>=0.72;
+  if(!/[а-я]/.test(n)&&n.length<=4)return conf>=0.75;
+  if(n.length>=8)return conf>=0.15;   // длинным репликам доверяем — они редко бывают шумом
+  return conf>=0.3;
 }
 
 /* =============== СТРАТЕГИЯ ocbz: строки → union-find пузыри → 2-й проход =============== */
@@ -553,15 +554,17 @@ function groupLinesToBlocks(lines){
     return {x:x0,y:y0,width:x1-x0,height:y1-y0,text:text.trim(),avgConf,pol,lines:g};
   });
 }
-/* фильтр мусора (пороги ocbz, massштаб-инвариантно) */
+/* фильтр мусора (пороги ocbz, адаптировано под нашу шкалу conf) */
 function blockOK(b,W,H){
-  if(b.width<Math.max(24,W*0.02)||b.height<Math.max(15,H*0.015))return false;
-  if(b.avgConf<0.5)return false;
+  if(b.width<Math.max(24,W*0.02)||b.height<Math.max(12,H*0.008))return false;
   const rus=(b.text.match(/[а-яА-ЯёЁ]/g)||[]).length;
   const tot=b.text.replace(/\s/g,'').length;
-  if(tot===0)return false;
-  if(rus/tot<0.4){const punct=tot<=6&&/[!?…]/.test(b.text);return punct&&b.avgConf>=0.65;}
-  return true;
+  if(tot<=1)return false;                              // одиночные «Я»/«•» — мусор
+  if(b.height>b.width*1.8)return false;                 // вертикальная «лесенка» декора
+  const punct=tot<=6&&/[!?…]/.test(b.text);
+  if(tot===2)return b.avgConf>=0.72;
+  if(rus/tot<0.4)return punct&&b.avgConf>=0.6;
+  return b.avgConf>=0.38;                               // длинные реплики — доверяем
 }
 /* сортировка баблов по режиму чтения */
 function sortBlocksM(blocks){
@@ -574,6 +577,14 @@ function sortBlocksM(blocks){
   });
 }
 function lightClean(t){return (t||'').replace(/[^\S\n]+/g,' ').trim();}
+/* средняя люма внутри области (для полярности блока: фон = большинство пикселей) */
+function meanLuma(p,x,y,w,h){
+  x=Math.max(0,x|0);y=Math.max(0,y|0);
+  w=Math.max(1,Math.min(p.W-x,Math.ceil(w)));h=Math.max(1,Math.min(p.H-y,Math.ceil(h)));
+  let s=0,n=0;
+  for(let yy=0;yy<h;yy+=3)for(let xx=0;xx<w;xx+=3){s+=p.lu[(y+yy)*p.W+x+xx];n++;}
+  return n?s/n:255;
+}
 /* словарь замен (из ocbz, без изменений) */
 const REPL=[
   {regex:/\b208\b/gi, replace:'ЗОВ'},
@@ -671,7 +682,7 @@ async function ocrPage(p,force){
     try{t=cleanupText(await readBlock(p,b));}catch(e){}
     if(!t||t.length<2)t=lightClean(b.text); // фолбэк на текст 1-го прохода
     if(!t)continue;
-    const B={x:b.x,y:b.y,w:b.width,h:b.height,pol:b.pol,text:t,conf:b.avgConf,
+    const B={x:b.x,y:b.y,w:b.width,h:b.height,pol:meanLuma(p,b.x,b.y,b.width,b.height)<110?1:0,text:t,conf:b.avgConf,
       rawLines:b.lines.map(l=>l.text),idx:out.length,sim:null,cls:''};
     if(gtN){const bw=bestWindow(gtN,norm(t));B.sim=bw.sim;B.cls=B.sim>=0.999?'hit':(B.sim>=0.75?'close':'miss');}
     out.push(B);
@@ -705,9 +716,9 @@ async function ocrRegion(p,rect){
     if(!r||!r.text||!keepLine(r.text,r.conf))continue;
     lines.push({x:boxes[i].x+rect.x,y:boxes[i].y+rect.y,w:boxes[i].w,h:boxes[i].h,text:r.text,conf:r.conf,pol:r.pol});
   }
-  /* склейка в пузыри (фильтр мягче — рамка уже мала) */
+  /* склейка в пузыри (фильтр мягче — рамка вручную) */
   let blocks=groupLinesToBlocks(lines);
-  blocks=blocks.filter(b=>b.avgConf>=0.45&&((b.width>=20&&b.height>=14)||b.text.replace(/\s/g,'').length>1));
+  blocks=blocks.filter(b=>blockOK(b,p.W,p.H)||b.avgConf>=0.55);
   blocks=sortBlocksM(blocks);
   /* выкинуть старые плашки, чей центр внутри рамки */
   p.lines=p.lines.filter(L=>{
@@ -724,7 +735,7 @@ async function ocrRegion(p,rect){
     try{t=cleanupText(await readBlock(p,b));}catch(e){}
     if(!t||t.length<2)t=lightClean(b.text);
     if(!t)continue;
-    p.lines.push({x:b.x,y:b.y,w:b.width,h:b.height,pol:b.pol,text:t,conf:b.avgConf,
+    p.lines.push({x:b.x,y:b.y,w:b.width,h:b.height,pol:meanLuma(p,b.x,b.y,b.width,b.height)<110?1:0,text:t,conf:b.avgConf,
       rawLines:b.lines.map(l=>l.text),idx:0,sim:null,cls:''});
     added++;
   }
